@@ -1,0 +1,24 @@
+{
+  "name": "solana-vesting-tests",
+  "version": "1.0.0",
+  "description": "Comprehensive security tests for Solana vesting contract",
+  "main": "comprehensive-solana-tests.js",
+  "scripts": {
+    "test": "node comprehensive-solana-tests.js",
+    "test:security": "node comprehensive-solana-tests.js",
+    "test:verbose": "DEBUG=* node comprehensive-solana-tests.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.87.6",
+    "@solana/spl-token": "^0.3.9"
+  },
+  "keywords": [
+    "solana",
+    "vesting",
+    "security",
+    "tests",
+    "blockchain"
+  ],
+  "author": "Security Team",
+  "license": "MIT"
+}

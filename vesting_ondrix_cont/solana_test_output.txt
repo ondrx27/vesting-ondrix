@@ -1,0 +1,106 @@
+ node comprehensive-solana-tests.js 
+
+================================================================================
+🚀 RUNNING COMPREHENSIVE TESTS FOR SOLANA VESTING CONTRACT
+================================================================================
+📋 Program under test: HR9LsNd42gUQZRKmmivdrxvAE33K9fvYZZhW5XAXFRUu
+🌐 RPC endpoint: https://api.devnet.solana.com
+💰 Test amount: 1000 tokens
+⏰ Cliff period: 300 seconds
+📅 Vesting period: 1200 seconds
+================================================================================
+📋 [2025-08-20T17:50:01.484Z] 🔧 STAGE 1: Test environment setup
+📋 [2025-08-20T17:50:01.486Z] 🚀 Setting up test environment...
+📋 [2025-08-20T17:50:03.035Z] ✅ Using wallet: 8MygYWsJDxPwCVVfcNuNUrFMToTgokMv6i2AxmrErjJf
+📋 [2025-08-20T17:50:03.279Z] ✅ SOL balance: 3.682401138 SOL
+📋 [2025-08-20T17:50:05.389Z] ✅ Created test token: h2pBAhVstWLNickyYxj9ATdw9PF2fKGPJNTLnQQyqR4
+📋 [2025-08-20T17:50:05.389Z] ✅ Test environment ready
+📋 [2025-08-20T17:50:05.389Z] Program: HR9LsNd42gUQZRKmmivdrxvAE33K9fvYZZhW5XAXFRUu
+📋 [2025-08-20T17:50:05.389Z]
+🔒 STAGE 2: Initialization security tests
+📋 [2025-08-20T17:50:05.390Z] 🔒 TEST 1: Initialization security
+✅ [2025-08-20T17:50:07.306Z] TEST PASSED: 1.1 Valid initialization
+✅ [2025-08-20T17:50:07.526Z] TEST PASSED: 1.2 Protection against double initialization
+📋 [2025-08-20T17:50:07.527Z]
+⏰ STAGE 3: Period validation tests
+📋 [2025-08-20T17:50:07.527Z] 🔒 TEST 2: Period validation
+✅ [2025-08-20T17:50:07.755Z] TEST PASSED: 2.1 Reject cliff >= vesting
+✅ [2025-08-20T17:50:07.989Z] TEST PASSED: 2.2 Reject excessive vesting period
+📋 [2025-08-20T17:50:07.989Z] 
+👥 STAGE 4: Recipient validation tests
+📋 [2025-08-20T17:50:07.989Z] 🔒 TEST 3: Recipient validation
+✅ [2025-08-20T17:50:07.990Z] TEST PASSED: 3.1 Reject total percentage != 100%
+✅ [2025-08-20T17:50:07.991Z] TEST PASSED: 3.2 Reject duplicate recipients
+✅ [2025-08-20T17:50:07.995Z] TEST PASSED: 3.3 Reject recipient count > 10
+✅ [2025-08-20T17:50:07.996Z] TEST PASSED: 3.4 Reject zero percentage
+✅ [2025-08-20T17:50:07.996Z] TEST PASSED: 3.5 Reject empty recipient list
+✅ [2025-08-20T17:50:07.997Z] TEST PASSED: 3.6 Reject percentage > 100%
+📋 [2025-08-20T17:50:07.997Z]
+💰 STAGE 5: Funding security tests
+📋 [2025-08-20T17:50:07.997Z] 🔒 TEST 4: Funding security
+✅ [2025-08-20T17:50:12.217Z] TEST PASSED: 4.1 Protection against funding by non-initializer
+✅ [2025-08-20T17:50:12.448Z] TEST PASSED: 4.2 Protection against wrong vault PDA
+✅ [2025-08-20T17:50:12.673Z] TEST PASSED: 4.3 Protection against zero-amount funding
+✅ [2025-08-20T17:50:14.125Z] TEST PASSED: 4.4 Valid funding
+✅ [2025-08-20T17:50:14.366Z] TEST PASSED: 4.5 Protection against double funding
+📋 [2025-08-20T17:50:14.366Z] 
+📊 STAGE 6: Distribution security tests
+📋 [2025-08-20T17:50:14.367Z] 🔒 TEST 5: Distribution security
+✅ [2025-08-20T17:50:19.678Z] TEST PASSED: 5.1 Valid distribution right after funding
+✅ [2025-08-20T17:50:19.909Z] TEST PASSED: 5.2 Protection against unauthorized distribution
+✅ [2025-08-20T17:50:20.139Z] TEST PASSED: 5.3 Protection against wrong vault authority
+✅ [2025-08-20T17:50:20.378Z] TEST PASSED: 5.4 Protection against wrong recipient ATAs
+✅ [2025-08-20T17:50:20.615Z] TEST PASSED: 5.5 Protection against wrong vesting PDA
+📋 [2025-08-20T17:50:20.615Z] ⏳ Waiting for cliff period to end...
+✅ [2025-08-20T17:55:15.902Z] TEST PASSED: 5.6 Valid distribution after cliff
+✅ [2025-08-20T17:55:16.153Z] TEST PASSED: 5.7 Cooldown protection against rapid repeated distribution
+📋 [2025-08-20T17:55:16.153Z] 
+🧮 STAGE 7: Mathematical accuracy tests
+📋 [2025-08-20T17:55:16.154Z] 🔒 TEST 6: Mathematical accuracy
+✅ [2025-08-20T17:55:16.357Z] TEST PASSED: 6.1 Fetch vesting data
+✅ [2025-08-20T17:55:16.357Z] TEST PASSED: 6.2 Persisted recipient count
+📋 [2025-08-20T17:55:16.357Z] 
+⚔️ STAGE 8: Initialization attack tests
+📋 [2025-08-20T17:55:16.357Z] 🔒 TEST 7: Initialization attack vectors
+✅ [2025-08-20T17:55:16.574Z] TEST PASSED: 7.1 Protection against wrong system programs
+✅ [2025-08-20T17:55:16.786Z] TEST PASSED: 7.2 Protection against incorrect PDAs
+✅ [2025-08-20T17:55:16.789Z] TEST PASSED: 7.3 Protection against extreme time values
+✅ [2025-08-20T17:55:17.070Z] TEST PASSED: 7.4 Protection against invalid TGE percentage
+✅ [2025-08-20T17:55:17.071Z] TEST PASSED: 7.5 Protection against oversized instruction data
+📋 [2025-08-20T17:55:17.071Z]
+💰 STAGE 9: Economic attack and overflow tests
+📋 [2025-08-20T17:55:17.071Z] 🔒 TEST 8: Economic attacks and overflows
+✅ [2025-08-20T17:55:19.680Z] TEST PASSED: 8.1 Protection against funding amount overflow
+✅ [2025-08-20T17:55:19.763Z] TEST PASSED: 8.2 Protection against vault drain via fake ATAs
+✅ [2025-08-20T17:55:19.765Z] TEST PASSED: 8.3 Protection against percentage overflow
+📋 [2025-08-20T17:55:19.765Z]
+🔄 STAGE 10: State and data consistency tests
+📋 [2025-08-20T17:55:19.765Z] 🔒 TEST 9: State and data consistency
+✅ [2025-08-20T17:55:20.029Z] TEST PASSED: 9.1 Total percentage consistency
+✅ [2025-08-20T17:55:20.030Z] TEST PASSED: 9.2 Validity of claimed amounts
+✅ [2025-08-20T17:55:20.285Z] TEST PASSED: 9.3 Protection against external data modification
+📋 [2025-08-20T17:55:20.285Z] 
+⚡ STAGE 11: Stress tests and edge cases
+📋 [2025-08-20T17:55:20.286Z] 🔒 TEST 10: Stress tests and edge cases
+✅ [2025-08-20T17:55:22.531Z] TEST PASSED: 10.1 Stress: maximum number of recipients
+✅ [2025-08-20T17:55:22.646Z] TEST PASSED: 10.2 Minimal time values
+✅ [2025-08-20T17:55:22.648Z] TEST PASSED: 10.3 Handling unbalanced percentages
+✅ [2025-08-20T17:55:23.847Z] TEST PASSED: 10.4 Protection against DoS via multiple PDAs
+✅ [2025-08-20T17:55:26.197Z] TEST PASSED: 10.5 Protection against re-initialization with same PDAs
+
+================================================================================
+📊 DETAILED FINAL TEST REPORT
+================================================================================
+⏱️  Total execution time: 325 seconds
+🎯 Total tests run: 40
+✅ Tests passed: 40
+❌ Tests failed: 0
+📈 Success rate: 100%
+
+🔒 Security level: HIGH (100%)
+
+💡 RECOMMENDATIONS:
+   • Contract is production-ready
+📄 Detailed report saved: ./solana-security-test-report-1755712526198.json
+================================================================================
+🎉 CONTRACT IS PRODUCTION-READY!

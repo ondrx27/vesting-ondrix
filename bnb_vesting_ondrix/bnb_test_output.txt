@@ -1,0 +1,164 @@
+npx hardhat run comprehensive-bsc-security-tests.js --network bscTestnet
+[dotenv@17.2.1] injecting env (8) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+[dotenv@17.2.1] injecting env (0) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+🔒 BSC VESTING CONTRACT SECURITY TESTER
+=======================================
+Network: BSC Testnet
+RPC: https://rpc.ankr.com/bsc_testnet_chapel/f1b0ac56b95dbd213f3bb78d4cee63813c22d8214a3c0e927a803a45e5acee15
+Test Token: 0xAc13eD3790D3b718940D46f37A4475F1277a01F3
+Vesting Contract: 0x70889C0545B6777D5855D4c2E7A497f534A18dd5
+=======================================
+
+[INFO] Initializing BSC contract security tester...
+[INFO] Connected to BSC Testnet
+[INFO] Test account: 0xea755aBa09CaAc2F73C4b6288256FF4Ae88beFbC
+[INFO] Account balance: 0.105048556772 BNB
+[PASS] Initialization completed successfully
+[INFO] 🚀 Running full BSC contract security test suite...
+================================================================================
+
+📋 BASIC FUNCTIONAL TESTS
+--------------------------------------------------
+[INFO] Testing contract deployment...
+[PASS] TestToken: Test Vesting Token (TVT), decimals: 18
+[PASS] Vesting Contract: MAX_RECIPIENTS=5, COOLDOWN=60s
+[INFO] Testing basic token operations...
+[INFO] Current token balance: 1000000.0
+[PASS] Tokens approved for vesting contract
+
+⚙️ VESTING INIT TESTS
+--------------------------------------------------
+[INFO] Testing vesting initialization...
+[PASS] Vesting initialized successfully
+[PASS] Vesting schedule created
+[INFO] Testing double-initialization protection...
+[PASS] Double-initialization protection works
+[INFO] Testing invalid recipients protection...
+[PASS] Empty recipients protection works
+
+💰 FUNDING TESTS
+--------------------------------------------------
+[INFO] Testing vesting funding...
+[PASS] Vesting funded successfully
+[PASS] Funding amount recorded correctly
+[PASS] Start time set
+[INFO] Testing double-funding protection...
+[PASS] Double-funding protection works
+
+🔒 SECURITY TESTS
+--------------------------------------------------
+[SECURITY] Testing access control...
+[PASS] Unauthorized distribution protection works
+[PASS] Non-existent vesting funding protection works
+[SECURITY] Testing protection against reentrancy attacks...
+[PASS] Concurrent calls handled without errors
+[INFO] Testing input validation...
+[PASS] Zero token address protection works
+[PASS] Excessive cliff protection works
+[PASS] Cliff/vesting ratio protection works
+
+⏰ TIME LOGIC TESTS
+--------------------------------------------------
+[INFO] Testing cliff period enforcement...
+[PASS] Cliff period correctly blocks distribution
+[INFO] Testing vesting periods...
+[INFO] Current vesting period: 0
+[INFO] Vesting progress: 0% unlocked
+[INFO] Next unlock: 10% in 5 minutes
+
+🎯 TOKEN DISTRIBUTION TESTS
+--------------------------------------------------
+[INFO] Testing token distribution...
+[INFO] Distribution not available yet (cliff period or fully distributed)
+[INFO] Testing cooldown between distributions...
+[PASS] Cooldown correctly blocks rapid re-distribution
+
+🧮 MATH AND EDGE CASE TESTS
+--------------------------------------------------
+[INFO] Testing mathematical accuracy...
+[PASS] Math logic is sound
+[FAIL] Math check error: Cannot convert undefined to a BigInt
+[INFO] Testing edge cases...
+[WARN] Insufficient funds for minimum parameters test
+
+📡 EVENT TESTS
+--------------------------------------------------
+[INFO] Testing event emission...
+[PASS] Found 1 VestingInitialized events
+[PASS] Found 1 VestingFunded events
+
+🔒 ADVANCED SECURITY TESTS
+--------------------------------------------------
+
+🕐 TIMESTAMP MANIPULATION PROTECTION TESTS
+--------------------------------------------------
+[SECURITY] Testing dependency on block.timestamp...
+[INFO] Time since vesting start: 7 seconds
+[INFO] Current period: 0
+[PASS] Time logic is consistent
+[PASS] Time parameters within reasonable bounds
+
+🔢 PRECISION ATTACK PROTECTION TESTS
+--------------------------------------------------
+[SECURITY] Testing precision/rounding attacks...
+[PASS] Invalid amount protection works
+[INFO] Testing division with remainder...
+[FAIL] Remainder division error: insufficient funds for intrinsic transaction cost (transaction="0xf901cb808407270e00830316819470889c0545b6777d5855d4c2e7a497f534a18dd580b90164716e8283000000000000000000000000ac13ed3790d3b718940d46f37a4475f1277a01f30000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000012c00000000000000000000000000000000000000000000000000000000000004b00000000000000000000000000000000000000000000000000000000000000003000000000000000000000000993bc3ca0f29b2f97e4dd7f382843af7797c02010000000000000000000000000000000000000000000000000000000000000021000000000000000000000000ea755aba09caac2f73c4b6288256ff4ae88befbc0000000000000000000000000000000000000000000000000000000000000021000000000000000000000000ea755aba09caac2f73c4b6288256ff4ae88befbc000000000000000000000000000000000000000000000000000000000000002281e6a0801767eef63254ce0e28fdc031821cb40f76751a42883b17093404a50759ae5ca0127766478d239ce77b3d2dcf3c71ab42d5aa61146237aedc21fd4949b7ed30be", info={ "error": { "code": -32000, "data": { "trace_id": "f2ce670c5d3e67e3c2a50f841875383a" }, "message": "INTERNAL_ERROR: insufficient funds" } }, code=INSUFFICIENT_FUNDS, version=6.15.0)
+
+🔄 STATE CONSISTENCY TESTS
+--------------------------------------------------
+[SECURITY] Testing contract state consistency...
+[WARN] Progress data unavailable to check balance
+[PASS] Unlocked/claimable relation is correct
+[PASS] Period does not move backwards
+[PASS] Recipients percentage sum = 100%
+[PASS] Last distribution time is valid
+
+⛽ GAS GRIEFING PROTECTION TESTS
+--------------------------------------------------
+[SECURITY] Testing protection against gas griefing attacks...
+[INFO] Gas for 1 recipients: 159831
+[INFO] Gas for 2 recipients: 181076
+[INFO] Gas for 3 recipients: 202369
+[INFO] Gas for 4 recipients: 223638
+[INFO] Gas for 5 recipients: 244896
+[PASS] Gas consumption grows linearly
+[PASS] Max gas within bounds: 244896
+
+👥 MULTI-USER CONFLICT TESTS
+--------------------------------------------------
+[SECURITY] Testing isolation between users...
+[INFO] Existing user data found
+[INFO] Non-existent user 1 correctly has no data
+[INFO] Non-existent user 2 correctly has no data
+[PASS] Isolation between users works
+[INFO] View functions correctly return 0 for non-existent users
+[INFO] Main user claimable: 0
+
+🎯 ADDITIONAL EDGE CASE TESTS
+--------------------------------------------------
+[SECURITY] Testing additional edge cases...
+[INFO] Testing maximum values...
+[FAIL] Unexpected error with maximum values: execution reverted: "Vesting is finalized" (action="estimateGas", data="0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001456657374696e672069732066696e616c697a6564000000000000000000000000", reason="Vesting is finalized", transaction={ "data": "0x716e8283000000000000000000000000ac13ed3790d3b718940d46f37a4475f1277a01f30000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000076a7000000000000000000000000000000000000000000000000000000000001e133800000000000000000000000000000000000000000000000000000000000000005000000000000000000000000bb360b1f8dcea27af7b64e6a680eca5229bb88c40000000000000000000000000000000000000000000000000000000000000014000000000000000000000000b2a3f8347198f4aab239031f8fa1693c68e4cdd500000000000000000000000000000000000000000000000000000000000000140000000000000000000000000ef728a1b1b73674b809380a5c8e8ba3be7d710f00000000000000000000000000000000000000000000000000000000000000140000000000000000000000000edbd6b71a4030c5768e9f9a387a3d197af4729800000000000000000000000000000000000000000000000000000000000000140000000000000000000000003d385cf9185d5e31cde0bea72454fce53da42ddb0000000000000000000000000000000000000000000000000000000000000014", "from": "0xea755aBa09CaAc2F73C4b6288256FF4Ae88beFbC", "to": "0x70889C0545B6777D5855D4c2E7A497f534A18dd5" }, invocation=null, revert={ "args": [ "Vesting is finalized" ], "name": "Error", "signature": "Error(string)" }, code=CALL_EXCEPTION, version=6.15.0)
+[INFO] Testing minimal values...
+[FAIL] Minimum values error: execution reverted: "Vesting is finalized" (action="estimateGas", data="0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001456657374696e672069732066696e616c697a6564000000000000000000000000", reason="Vesting is finalized", transaction={ "data": "0x716e8283000000000000000000000000ac13ed3790d3b718940d46f37a4475f1277a01f300000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003c000000000000000000000000000000000000000000000000000000000000000100000000000000000000000056051d837e86ed8e16a5106f996cf667c660daa70000000000000000000000000000000000000000000000000000000000000064", "from": "0xea755aBa09CaAc2F73C4b6288256FF4Ae88beFbC", "to": "0x70889C0545B6777D5855D4c2E7A497f534A18dd5" }, invocation=null, revert={ "args": [ "Vesting is finalized" ], "name": "Error", "signature": "Error(string)" }, code=CALL_EXCEPTION, version=6.15.0)  
+[INFO] Testing invalid ratios...
+[WARN] Unexpected ratio error: execution reverted: "Vesting is finalized" (action="estimateGas", data="0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001456657374696e672069732066696e616c697a6564000000000000000000000000", 
+reason="Vesting is finalized", transaction={ "data": "0x716e8283000000000000000000000000ac13ed3790d3b718940d46f37a4475f1277a01f300000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000258000000000000000000000000000000000000000000000000000000000000012c0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000b20eaa247a99140ad9b0a509f56e1be9464d0f910000000000000000000000000000000000000000000000000000000000000064", "from": "0xea755aBa09CaAc2F73C4b6288256FF4Ae88beFbC", "to": "0x70889C0545B6777D5855D4c2E7A497f534A18dd5" }, invocation=null, revert={ "args": [ "Vesting is finalized" ], "name": "Error", "signature": "Error(string)" }, code=CALL_EXCEPTION, version=6.15.0)[INFO] Testing duplicate recipients...
+[INFO] Duplicates possible: insufficient funds for intrinsic transaction cost (transaction="0xf9018b808407270e008302c36c9470889c0545b6777d5855d4c2e7a497f534a18dd580b90124716e8283000000000000000000000000ac13ed3790d3b718940d46f37a4475f1277a01f30000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000012c00000000000000000000000000000000000000000000000000000000000004b000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000837dd3128efd8f6418e7e7f41043c7eb061f6aa00000000000000000000000000000000000000000000000000000000000000320000000000000000000000000837dd3128efd8f6418e7e7f41043c7eb061f6aa000000000000000000000000000000000000000000000000000000000000003281e6a0ce689fe086ca6cfb7601737046b5be053f10be0973fdfafec7d4ae21ca579888a01bc0016db3f918822daaef8710e7f333f223bafa22124a5a1b7668a121d21536", info={ "error": { "code": -32000, "data": { "trace_id": "337efd5a3f5f173fc1d415ac527b3bdd" }, "message": "INTERNAL_ERROR: insufficient funds" } }, code=INSUFFICIENT_FUNDS, version=6.15.0)
+
+================================================================================
+📊 FINAL TEST REPORT
+================================================================================
+
+✅ Tests passed: 33
+❌ Tests failed: 4
+⚠️ Warnings: 3
+🚨 Critical issues: 0
+📊 Security level: 89%
+⏱️ Duration: 26 seconds
+
+📄 Detailed report saved: bsc-vesting-security-report-1755711887099.json
+
+================================================================================
+🎉 CONTRACT PASSED SECURITY TESTING!
