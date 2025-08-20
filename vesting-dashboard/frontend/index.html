@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vesting Dashboard</title>
+    
+    <meta name="description" content="Secure token vesting dashboard for BNB Smart Chain and Solana" />
+    <meta name="keywords" content="vesting, tokens, blockchain, BNB, Solana, dashboard" />
+    <meta name="author" content="Your Name" />
+    
+    <meta property="og:title" content="Vesting Dashboard" />
+    <meta property="og:description" content="Secure token vesting dashboard" />
+    <meta property="og:type" content="website" />
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+        color: #e0e0e0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+          'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      
+      .app-loader {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        gap: 20px;
+      }
+      
+      .app-loader h1 {
+        background: linear-gradient(45deg, #00ff88, #00cc6a);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-size: 2.5em;
+        margin: 0;
+      }
+      
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #333;
+        border-left: 4px solid #00ff88;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      .loading-text {
+        color: #888;
+        font-size: 1.1em;
+      }
+      
+      .app-loaded .app-loader {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>
+      <div style="
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        text-align: center;
+        padding: 20px;
+      ">
+        <h1>JavaScript Required</h1>
+        <p>This vesting dashboard requires JavaScript to function properly.</p>
+        <p>Please enable JavaScript in your browser settings and refresh the page.</p>
+      </div>
+    </noscript>
+    
+    <div id="root">
+      <div class="app-loader">
+        <h1>Vesting Dashboard</h1>
+        <div class="spinner"></div>
+        <div class="loading-text">Loading secure vesting interface...</div>
+      </div>
+    </div>
+    
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <script>
+      window.addEventListener('load', () => {
+        if (!window.crypto || !window.crypto.subtle) {
+          console.warn('Browser does not support Web Crypto API');
+        }
+        
+        if (typeof window.ethereum !== 'undefined') {
+          console.log('MetaMask or compatible wallet detected');
+        }
+        
+        if (typeof window.solana !== 'undefined') {
+          console.log('Solana wallet detected');
+        }
+        
+        setTimeout(() => {
+          const loader = document.querySelector('.app-loader');
+          if (loader && document.querySelector('.app')) {
+            document.body.classList.add('app-loaded');
+          }
+        }, 1000);
+      });
+      
+      window.addEventListener('error', (e) => {
+        console.error('Application loading error:', e);
+        const loader = document.querySelector('.app-loader');
+        if (loader) {
+          loader.innerHTML = `
+            <h1>Loading Error</h1>
+            <p style="color: #ff4444; text-align: center;">
+              Failed to load the application. Please check your internet connection and try again.
+            </p>
+            <button onclick="location.reload()" style="
+              background: linear-gradient(145deg, #00ff88, #00cc6a);
+              color: #000;
+              border: none;
+              padding: 12px 24px;
+              border-radius: 8px;
+              cursor: pointer;
+              font-size: 1em;
+              font-weight: 600;
+              margin-top: 20px;
+            ">
+              Retry
+            </button>
+          `;
+        }
+      });
+    </script>
+  </body>
+</html>
