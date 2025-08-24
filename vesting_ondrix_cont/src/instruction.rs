@@ -2,7 +2,7 @@ use solana_program::{
     program_error::ProgramError,
     pubkey::Pubkey,
 };
-use crate::state::MAX_RECIPIENTS;
+use crate::state::{MAX_RECIPIENTS, BASIS_POINTS_TOTAL};
 
 #[derive(Debug)]
 pub enum InstructionError {
@@ -17,53 +17,24 @@ impl From<InstructionError> for ProgramError {
     }
 }
 
-// ✅ Безопасная версия инструкций без emergency функций
 #[derive(Debug)]
 pub enum VestingInstruction {
-    /// Инициализация вестинга с получателями и расписанием
-    /// Accounts:
-    /// 0. `[signer]` Initializer
-    /// 1. `[writable]` Vesting PDA
-    /// 2. `[writable]` Vault PDA
-    /// 3. `[]` Mint
-    /// 4. `[]` System Program
-    /// 5. `[]` Token Program
-    /// 6. `[]` Rent Sysvar
     InitializeVesting {
         recipients: Vec<RecipientData>,
         cliff_period: i64,
         vesting_period: i64,
-        tge_percentage: u8,
+        tge_basis_points: u16,
+        nonce: u64,  
     },
-    
-    /// Фандинг vault'а вестинга
-    /// Accounts:
-    /// 0. `[signer]` Funder
-    /// 1. `[writable]` Source Token Account
-    /// 2. `[writable]` Vault PDA
-    /// 3. `[writable]` Vesting PDA
-    /// 4. `[]` Token Program
-    /// 5. `[]` Clock Sysvar
     Fund(u64),
-    
-    /// ✅ Распределение разблокированных токенов (только инициатор)
-    /// Accounts:
-    /// 0. `[signer]` Initializer (должен совпадать с оригинальным)
-    /// 1. `[writable]` Vesting PDA
-    /// 2. `[writable]` Vault PDA
-    /// 3. `[]` Token Program
-    /// 4. `[]` Clock Sysvar
-    /// 5. `[]` Vault Authority PDA
-    /// 6+ `[writable]` Recipient ATAs (в правильном порядке)
     Claim,
     
-    // ✅ УДАЛЕНО: EmergencyWithdraw для безопасности
 }
 
 #[derive(Debug, Clone)]
 pub struct RecipientData {
     pub wallet: Pubkey,
-    pub percentage: u8,
+    pub basis_points: u16,  
 }
 
 impl VestingInstruction {
@@ -74,8 +45,7 @@ impl VestingInstruction {
 
         match data[0] {
             0 => {
-                // InitializeVesting с получателями и расписанием
-                if data.len() < 19 {
+                if data.len() < 28 { 
                     return Err(InstructionError::InvalidInstructionData.into());
                 }
                 
@@ -84,7 +54,6 @@ impl VestingInstruction {
                     return Err(InstructionError::InvalidRecipientCount.into());
                 }
                 
-                // Чтение параметров расписания
                 let cliff_period = i64::from_le_bytes(
                     data[2..10].try_into()
                         .map_err(|_| InstructionError::InvalidInstructionData)?
@@ -93,37 +62,51 @@ impl VestingInstruction {
                     data[10..18].try_into()
                         .map_err(|_| InstructionError::InvalidInstructionData)?
                 );
-                let tge_percentage = data[18];
+                let tge_basis_points = u16::from_le_bytes(
+                    data[18..20].try_into()
+                        .map_err(|_| InstructionError::InvalidInstructionData)?
+                );
+                let nonce = u64::from_le_bytes(
+                    data[20..28].try_into()
+                        .map_err(|_| InstructionError::InvalidInstructionData)?
+                );
                 
-                // Каждый получатель занимает 33 байта (32 для pubkey + 1 для процента)
-                let expected_len = 19 + (recipient_count * 33);
+                let recipient_data_size = recipient_count.saturating_mul(34);
+                let expected_len = 28_usize.saturating_add(recipient_data_size);
+                
+                if recipient_data_size / 34 != recipient_count {
+                    return Err(InstructionError::InvalidInstructionData.into());
+                }
+                
                 if data.len() != expected_len {
                     return Err(InstructionError::InvalidInstructionData.into());
                 }
                 
-                let mut recipients = Vec::with_capacity(recipient_count);
-                let mut offset = 19;
+                let mut recipients = Vec::with_capacity(recipient_count.min(MAX_RECIPIENTS));
+                let mut offset = 28; 
                 
                 for _ in 0..recipient_count {
                     let wallet_bytes: [u8; 32] = data[offset..offset + 32]
                         .try_into()
                         .map_err(|_| InstructionError::InvalidInstructionData)?;
                     let wallet = Pubkey::new_from_array(wallet_bytes);
-                    let percentage = data[offset + 32];
+                    let basis_points = u16::from_le_bytes(
+                        data[offset + 32..offset + 34].try_into()
+                            .map_err(|_| InstructionError::InvalidInstructionData)?
+                    );
                     
                     recipients.push(RecipientData {
                         wallet,
-                        percentage,
+                        basis_points,  
                     });
                     
-                    offset += 33;
+                    offset += 34;  
                 }
                 
-                // ✅ Валидация что проценты в сумме дают 100
-                let total_percentage: u16 = recipients.iter()
-                    .map(|r| r.percentage as u16)
+                let total_basis_points: u32 = recipients.iter()
+                    .map(|r| r.basis_points as u32)
                     .sum();
-                if total_percentage != 100 {
+                if total_basis_points != BASIS_POINTS_TOTAL as u32 {
                     return Err(InstructionError::InvalidTotalPercentage.into());
                 }
                 
@@ -131,7 +114,8 @@ impl VestingInstruction {
                     recipients,
                     cliff_period,
                     vesting_period,
-                    tge_percentage,
+                    tge_basis_points,  
+                    nonce,  
                 })
             }
             1 => {
@@ -146,10 +130,8 @@ impl VestingInstruction {
                 Ok(VestingInstruction::Fund(amount))
             }
             2 => {
-                // ✅ Claim - только централизованное распределение
                 Ok(VestingInstruction::Claim)
             }
-            // ✅ УДАЛЕНО: инструкция 3 (EmergencyWithdraw) для безопасности
             _ => Err(InstructionError::InvalidInstructionData.into()),
         }
     }

@@ -5,11 +5,12 @@ use solana_program::{
 };
 
 pub const MAX_RECIPIENTS: usize = 10;
+pub const BASIS_POINTS_TOTAL: u16 = 10000;  // ✅ CRITICAL FIX: 10000 = 100% for precision
 
 #[derive(Debug, Clone, Copy)]
 pub struct Recipient {
     pub wallet: Pubkey,
-    pub percentage: u8,
+    pub basis_points: u16,  // ✅ CRITICAL FIX: Use basis points (0-10000) for precision
     pub claimed_amount: u64,
     pub last_claim_time: i64,
 }
@@ -18,7 +19,7 @@ impl Default for Recipient {
     fn default() -> Self {
         Self {
             wallet: Pubkey::default(),
-            percentage: 0,
+            basis_points: 0,  // ✅ CRITICAL FIX: Use basis points
             claimed_amount: 0,
             last_claim_time: 0,
         }
@@ -31,8 +32,8 @@ pub struct VestingSchedule {
     pub cliff_period: i64,
     /// Общий период вестинга в секундах от start_time
     pub vesting_period: i64,
-    /// Процент выпуска в TGE (Token Generation Event)
-    pub tge_percentage: u8,
+    /// Basis points выпуска в TGE (Token Generation Event) - 0-10000
+    pub tge_basis_points: u16,  // ✅ CRITICAL FIX: Use basis points for precision
 }
 
 impl Default for VestingSchedule {
@@ -40,7 +41,7 @@ impl Default for VestingSchedule {
         Self {
             cliff_period: 0,
             vesting_period: 0,
-            tge_percentage: 0,
+            tge_basis_points: 0,  // ✅ CRITICAL FIX: Use basis points
         }
     }
 }
@@ -65,8 +66,8 @@ pub struct VestingAccount {
     pub recipients: [Recipient; MAX_RECIPIENTS],
     /// Фактическое количество получателей
     pub recipient_count: u8,
-    /// Флаг экстренной отмены
-    pub is_revoked: bool,
+    // ✅ REMOVED: is_revoked flag to ensure complete immutability
+    // pub is_revoked: bool, // DELETED - no termination possible
     /// ✅ НОВОЕ: Флаг финализации (предотвращает изменения после фандинга)
     pub is_finalized: bool,
     /// ✅ НОВОЕ: Время последнего распределения (для cooldown)
@@ -82,9 +83,7 @@ impl IsInitialized for VestingAccount {
 }
 
 impl Pack for VestingAccount {
-    // ✅ Обновленный размер с новыми полями
-    const LEN: usize = 1 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 1 + 1 + 1 + 1 + 8 + (MAX_RECIPIENTS * 49);
-    //                is_init + initializer + mint + vault + start_time + total_amount + cliff + vesting + tge% + count + revoked + finalized + last_dist_time + recipients
+    const LEN: usize = 1 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 2 + 1 + 1 + 8 + (MAX_RECIPIENTS * 50);
 
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
         if src.len() != Self::LEN {
@@ -128,11 +127,12 @@ impl Pack for VestingAccount {
                 .map_err(|_| ProgramError::InvalidAccountData)?
         );
         
-        let tge_percentage = src[129];
-        let recipient_count = src[130];
-        let is_revoked = src[131] != 0;
+        let tge_basis_points = u16::from_le_bytes(
+            src[129..131].try_into()
+                .map_err(|_| ProgramError::InvalidAccountData)?
+        );
+        let recipient_count = src[131];
         
-        // ✅ НОВЫЕ ПОЛЯ
         let is_finalized = src[132] != 0;
         let last_distribution_time = i64::from_le_bytes(
             src[133..141].try_into()
@@ -140,30 +140,37 @@ impl Pack for VestingAccount {
         );
 
         let mut recipients = [Recipient::default(); MAX_RECIPIENTS];
-        let mut offset = 141; // Обновленный offset
+        let mut offset = 141; 
         
         for i in 0..MAX_RECIPIENTS {
             let wallet = Pubkey::new_from_array(
                 src[offset..offset + 32].try_into()
                     .map_err(|_| ProgramError::InvalidAccountData)?
             );
-            let percentage = src[offset + 32];
+            let basis_points = u16::from_le_bytes(
+                src[offset + 32..offset + 34].try_into()
+                    .map_err(|_| ProgramError::InvalidAccountData)?
+            );
             let claimed_amount = u64::from_le_bytes(
-                src[offset + 33..offset + 41].try_into()
+                src[offset + 34..offset + 42].try_into()
                     .map_err(|_| ProgramError::InvalidAccountData)?
             );
             let last_claim_time = i64::from_le_bytes(
-                src[offset + 41..offset + 49].try_into()
+                src[offset + 42..offset + 50].try_into()
                     .map_err(|_| ProgramError::InvalidAccountData)?
             );
             
-            recipients[i] = Recipient { 
-                wallet, 
-                percentage, 
-                claimed_amount,
-                last_claim_time,
-            };
-            offset += 49;
+            if i < recipient_count as usize {
+                recipients[i] = Recipient { 
+                    wallet, 
+                    basis_points, 
+                    claimed_amount,
+                    last_claim_time,
+                };
+            } else {
+                recipients[i] = Recipient::default();
+            }
+            offset += 50; 
         }
 
         Ok(VestingAccount {
@@ -176,11 +183,10 @@ impl Pack for VestingAccount {
             schedule: VestingSchedule {
                 cliff_period,
                 vesting_period,
-                tge_percentage,
+                tge_basis_points,
             },
             recipients,
             recipient_count,
-            is_revoked,
             is_finalized,
             last_distribution_time,
         })
@@ -199,21 +205,19 @@ impl Pack for VestingAccount {
         dst[105..113].copy_from_slice(&self.total_amount.to_le_bytes());
         dst[113..121].copy_from_slice(&self.schedule.cliff_period.to_le_bytes());
         dst[121..129].copy_from_slice(&self.schedule.vesting_period.to_le_bytes());
-        dst[129] = self.schedule.tge_percentage;
-        dst[130] = self.recipient_count;
-        dst[131] = if self.is_revoked { 1 } else { 0 };
+        dst[129..131].copy_from_slice(&self.schedule.tge_basis_points.to_le_bytes());
+        dst[131] = self.recipient_count;
         
-        // ✅ НОВЫЕ ПОЛЯ
         dst[132] = if self.is_finalized { 1 } else { 0 };
         dst[133..141].copy_from_slice(&self.last_distribution_time.to_le_bytes());
 
-        let mut offset = 141; // Обновленный offset
+        let mut offset = 141; 
         for recipient in &self.recipients {
             dst[offset..offset + 32].copy_from_slice(recipient.wallet.as_ref());
-            dst[offset + 32] = recipient.percentage;
-            dst[offset + 33..offset + 41].copy_from_slice(&recipient.claimed_amount.to_le_bytes());
-            dst[offset + 41..offset + 49].copy_from_slice(&recipient.last_claim_time.to_le_bytes());
-            offset += 49;
+            dst[offset + 32..offset + 34].copy_from_slice(&recipient.basis_points.to_le_bytes());
+            dst[offset + 34..offset + 42].copy_from_slice(&recipient.claimed_amount.to_le_bytes());
+            dst[offset + 42..offset + 50].copy_from_slice(&recipient.last_claim_time.to_le_bytes());
+            offset += 50; 
         }
     }
 }

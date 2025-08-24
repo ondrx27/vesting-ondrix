@@ -4,8 +4,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Contract addresses
-const TEST_TOKEN_ADDRESS = "0xF2E70C4f1D869A35d848B1839898818A74F5bD6B";
-const VESTING_ADDRESS = "0x5014da6ff45549fE8BaE0e528180Dd17e4E6044B";
+const TEST_TOKEN_ADDRESS = "0xA6Fe6abb1E74C58e443817c8736840Af015F1a00";
+const VESTING_ADDRESS = "0x9b9eB8fDeb65e9DC4AECCC5c62377a16ebdF5252";
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -13,7 +13,7 @@ async function main() {
 
   // Load contracts
   const testToken = await ethers.getContractAt("TestToken", TEST_TOKEN_ADDRESS);
-  const vesting = await ethers.getContractAt("TokenVesting", VESTING_ADDRESS);
+  const vesting = await ethers.getContractAt("ProductionTokenVesting", VESTING_ADDRESS);
 
   try {
     console.log("\n=== TOKEN BALANCES ===");
@@ -35,7 +35,7 @@ async function main() {
       const recipient = recipients[i];
       const balance = await testToken.balanceOf(recipient.wallet);
       totalRecipientBalance += balance;
-      console.log(`Recipient ${i + 1} (${recipient.percentage}%): ${recipient.wallet}`);
+      console.log(`Recipient ${i + 1} (${recipient.basisPoints/100}%): ${recipient.wallet}`);
       console.log(`  Balance: ${ethers.formatEther(balance)} tokens`);
     }
     

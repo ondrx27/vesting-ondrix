@@ -60,9 +60,6 @@ pub enum VestingError {
     #[error("Insufficient funds")]
     InsufficientFunds,
     
-    #[error("Vesting revoked")]
-    VestingRevoked,
-    
     #[error("Not funded")]
     NotFunded,
     
@@ -78,9 +75,6 @@ pub enum VestingError {
     #[error("Unauthorized access")]
     UnauthorizedAccess,
     
-    #[error("Already revoked")]
-    AlreadyRevoked,
-    
     #[error("No tokens to withdraw")]
     NoTokensToWithdraw,
     
@@ -92,6 +86,39 @@ pub enum VestingError {
     
     #[error("Invalid instruction data")]
     InvalidInstructionData,
+    
+    #[error("Not initialized")]
+    NotInitializer,
+    
+    #[error("Vesting finalized")]
+    VestingFinalized,
+    
+    #[error("Not finalized")]
+    NotFinalized,
+    
+    #[error("Distribution cooldown")]
+    DistributionCooldown,
+    
+    #[error("Vesting duration too long")]
+    VestingDurationTooLong,
+    
+    #[error("Cliff duration too long")]
+    CliffDurationTooLong,
+    
+    #[error("Invalid account owner")]
+    InvalidAccountOwner,
+    
+    #[error("Invalid mint")]
+    InvalidMint,
+    
+    #[error("Invalid clock sysvar")]
+    InvalidClockSysvar,
+    
+    #[error("Invalid ATA count")]
+    InvalidATACount,
+    
+    #[error("Invalid recipient wallet")]
+    InvalidRecipientWallet,
 }
 
 impl From<VestingError> for ProgramError {
