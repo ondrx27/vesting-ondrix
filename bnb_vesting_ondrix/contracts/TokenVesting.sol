@@ -29,7 +29,8 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         Recipient[5] recipients;
         uint8 recipientCount;
         bool isFinalized;
-        address authorizedFunder;     
+        address authorizedFunder;
+        uint16 tgeBasisPoints;        
     }
 
     struct TransferData {
@@ -56,6 +57,7 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         address indexed authorizedFunder,
         uint256 cliffDuration,
         uint256 vestingDuration,
+        uint16 tgeBasisPoints,
         uint8 recipientCount
     );
     event VestingFunded(address indexed beneficiary, uint256 amount, uint256 startTime);
@@ -174,7 +176,8 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         address _authorizedFunder,
         Recipient[] memory _recipients,
         uint256 _cliffDuration,
-        uint256 _vestingDuration
+        uint256 _vestingDuration,
+        uint16 _tgeBasisPoints
     ) external 
         onlyAuthorizedInitializer 
         validAddress(_token) 
@@ -190,6 +193,7 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         require(_cliffDuration <= MAX_CLIFF_DURATION, "Cliff duration too long");
         require(_vestingDuration > _cliffDuration, "Vesting duration must be greater than cliff");
         require(_vestingDuration > 0, "Vesting duration must be greater than 0");
+        require(_tgeBasisPoints <= BASIS_POINTS_TOTAL, "TGE basis points too high");
 
         uint256 totalBasisPoints = 0;
         
@@ -227,6 +231,7 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         schedule.lastDistributionTime = 0;
         schedule.recipientCount = uint8(_recipients.length);
         schedule.isFinalized = false;
+        schedule.tgeBasisPoints = _tgeBasisPoints;
         
         for (uint8 i = 0; i < MAX_RECIPIENTS; i++) {
             if (i < _recipients.length) {
@@ -252,6 +257,7 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
             _authorizedFunder,
             _cliffDuration, 
             _vestingDuration, 
+            _tgeBasisPoints,
             uint8(_recipients.length)
         );
     }
@@ -313,7 +319,7 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         require(schedule.startTime > 0, "Vesting not funded");
         require(schedule.isFinalized, "Vesting not finalized");
-        require(block.timestamp >= schedule.startTime + schedule.cliffDuration, "Still in cliff period");
+        // TGE logic is handled in _calculateTotalUnlockedAmount
         
         _validateVestingState(_beneficiary);
 
@@ -342,16 +348,18 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
             }
         }
         
-        for (uint8 i = 0; i < transferCount; i++) {
-            Recipient storage recipient = schedule.recipients[transfers[i].recipientIndex];
-            recipient.claimedAmount += transfers[i].amount;
-            recipient.lastClaimTime = block.timestamp;
-        }
-        
+        // SECURE: First do all transfers, then update state
         for (uint8 i = 0; i < transferCount; i++) {
             Recipient storage recipient = schedule.recipients[transfers[i].recipientIndex];
             token.safeTransfer(recipient.wallet, transfers[i].amount);
             emit TokensDistributed(_beneficiary, recipient.wallet, transfers[i].amount, block.timestamp);
+        }
+        
+        // Then update claimed amounts and timestamps
+        for (uint8 i = 0; i < transferCount; i++) {
+            Recipient storage recipient = schedule.recipients[transfers[i].recipientIndex];
+            recipient.claimedAmount += transfers[i].amount;
+            recipient.lastClaimTime = block.timestamp;
         }
 
         schedule.lastDistributionTime = block.timestamp;
@@ -361,7 +369,7 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         require(schedule.startTime > 0, "Vesting not funded");
         require(schedule.isFinalized, "Vesting not finalized");
-        require(block.timestamp >= schedule.startTime + schedule.cliffDuration, "Still in cliff period");
+        // TGE logic is handled in _calculateTotalUnlockedAmount
         
         _validateVestingState(_beneficiary);
 
@@ -380,11 +388,12 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         uint256 claimableAmount = _calculateRecipientClaimableAmount(_beneficiary, _recipient);
         require(claimableAmount > 0, "No tokens available for recipient");
 
-        recipient.claimedAmount += claimableAmount;
-        recipient.lastClaimTime = block.timestamp;
-        
+        // SECURE: First transfer, then update state
         IERC20 token = IERC20(schedule.token);
         token.safeTransfer(_recipient, claimableAmount);
+        
+        recipient.claimedAmount += claimableAmount;
+        recipient.lastClaimTime = block.timestamp;
 
         emit TokensClaimed(_beneficiary, _recipient, claimableAmount, block.timestamp);
     }
@@ -396,10 +405,7 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
             return 0;
         }
 
-        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
-            return 0;
-        }
-
+        // Use the centralized logic that properly handles TGE + cliff
         uint256 totalUnlocked = _calculateTotalUnlockedAmount(_beneficiary);
         
         uint256 totalClaimedByRecipients = 0;
@@ -427,8 +433,8 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
 
         Recipient storage recipient = schedule.recipients[recipientIndex];
         
+        // Use the centralized logic that properly handles TGE + cliff
         uint256 totalUnlocked = _calculateTotalUnlockedAmount(_beneficiary);
-        
         uint256 recipientTotalUnlocked = Math.mulDiv(totalUnlocked, recipient.basisPoints, BASIS_POINTS_TOTAL);
 
         return recipientTotalUnlocked > recipient.claimedAmount ? 
@@ -442,20 +448,25 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
             return 0;
         }
 
-        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
-            return 0;
-        }
-
         uint256 elapsedTime = block.timestamp - schedule.startTime;
+        
+        uint256 tgeAmount = Math.mulDiv(schedule.totalAmount, schedule.tgeBasisPoints, BASIS_POINTS_TOTAL);
+        
+        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
+            return tgeAmount;
+        }
 
         if (elapsedTime >= schedule.vestingDuration) {
             return schedule.totalAmount;
         }
 
+        uint256 vestingAmount = schedule.totalAmount - tgeAmount;
         uint256 vestingElapsed = elapsedTime - schedule.cliffDuration;
         uint256 remainingVesting = schedule.vestingDuration - schedule.cliffDuration;
         
-        return Math.mulDiv(schedule.totalAmount, vestingElapsed, remainingVesting);
+        uint256 linearVested = Math.mulDiv(vestingAmount, vestingElapsed, remainingVesting);
+        
+        return tgeAmount + linearVested;
     }
 
     function _validateVestingState(address _beneficiary) internal view {
@@ -520,10 +531,6 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
             return false;
         }
 
-        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
-            return false;
-        }
-
         if (schedule.lastDistributionTime > 0) {
             if (block.timestamp < schedule.lastDistributionTime + DISTRIBUTION_COOLDOWN) {
                 return false;
@@ -537,10 +544,6 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         
         if (!schedule.isInitialized || schedule.startTime == 0 || !schedule.isFinalized) {
-            return false;
-        }
-
-        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
             return false;
         }
 
@@ -570,6 +573,7 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         uint256 vestingDuration,
         uint256 totalAmount,
         uint256 claimedAmount,
+        uint16 tgeBasisPoints,
         uint8 recipientCount
     ) {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
@@ -587,7 +591,8 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
             schedule.cliffDuration,
             schedule.vestingDuration,
             schedule.totalAmount,
-            actualClaimedAmount, 
+            actualClaimedAmount,
+            schedule.tgeBasisPoints,
             schedule.recipientCount
         );
     }

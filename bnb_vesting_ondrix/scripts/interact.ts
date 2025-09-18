@@ -4,8 +4,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Contract addresses (update after deployment)
-const TEST_TOKEN_ADDRESS = "0x2B55A4C03EC89Ce4A7d46A3A84794824A6a03C26";
-const VESTING_ADDRESS = "0x581105A2F4899A0Dd943EceDaB981e25BEf755F9";
+const TEST_TOKEN_ADDRESS = "0xe7B36B5666F69C659126c9e324752FdDC3105fE8";
+const VESTING_ADDRESS = "0x2A6cE99CA3D84B4eC2Cc50aBf05f83a4A1eCF46A";
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -34,16 +34,16 @@ async function main() {
 
   console.log("Recipients:", recipients);
 
-  // Settings for cliff and vesting duration - TEST PERIODS
-  const cliffDuration = 5 * 60;       // 5 minutes cliff
-  const vestingDuration = 20 * 60;    // 20 minutes total vesting
+  // Settings for cliff and vesting duration - TEST PERIODS  
+  const cliffDuration = 10 * 60;      // 10 minutes cliff (enough time to test)
+  const vestingDuration = 30 * 60;    // 30 minutes total vesting
+  const tgeBasisPoints = 1500;        // 15% TGE unlock (1500 basis points)
   
   console.log("⏰ Test Vesting Schedule:");
-  console.log("  Cliff: 5 minutes (no claiming)");
-  console.log("  5 min: 10% unlocked");
-  console.log("  10 min: 20% unlocked"); 
-  console.log("  15 min: 50% unlocked");
-  console.log("  20 min: 100% unlocked");
+  console.log("  TGE (Launch): 15% immediately available");
+  console.log("  Cliff: 10 minutes (only TGE available)");
+  console.log("  10+ min: TGE + linear vesting of remaining 85%");
+  console.log("  30 min: 100% unlocked");
 
   try {
     // 1. Validate token first (owner only)
@@ -65,7 +65,8 @@ async function main() {
       deployer.address, // authorized funder
       recipients,
       cliffDuration,
-      vestingDuration
+      vestingDuration,
+      tgeBasisPoints
     );
     await initTx.wait();
     console.log("✅ Vesting initialized!");
