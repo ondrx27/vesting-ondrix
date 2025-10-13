@@ -2,7 +2,6 @@ use solana_program::{
     account_info::{next_account_info, AccountInfo},
     clock::Clock,
     entrypoint::ProgramResult,
-    msg,
     program::{invoke_signed, invoke},
     pubkey::Pubkey,
     rent::Rent,
@@ -434,13 +433,11 @@ fn process_distribute_to_all(
     }
 
     let mut total_distributed = 0u64;
-    let mut successful_distributions = 0u8;
-    
+
     let mut transfer_instructions: Vec<(usize, u64, &AccountInfo)> = Vec::with_capacity(MAX_RECIPIENTS);
     let mut pending_updates: Vec<(usize, u64, i64)> = Vec::with_capacity(MAX_RECIPIENTS);
     
-    for i in 0..vesting.recipient_count as usize {
-        let recipient = &vesting.recipients[i];
+    for (i, recipient) in vesting.recipients.iter().take(vesting.recipient_count as usize).enumerate() {
         
         if recipient.wallet == Pubkey::default() || recipient.basis_points == 0 {
             continue;
@@ -490,7 +487,7 @@ fn process_distribute_to_all(
             )?,
             &[
                 vault_pda.clone(),
-                recipient_ata.clone(),
+                (*recipient_ata).clone(),
                 vault_authority.clone(),
                 token_program.clone(),
             ],
@@ -499,7 +496,6 @@ fn process_distribute_to_all(
         
         pending_updates.push((*recipient_index, *claimable, current_time));
         total_distributed += *claimable;
-        successful_distributions += 1;
     }
 
     for (recipient_index, claimed_amount, claim_time) in pending_updates {
@@ -545,7 +541,6 @@ fn calculate_vested_amount(
     let vesting_elapsed = elapsed - schedule.cliff_period;
     
     let linear_vested = (vesting_amount as u128 * vesting_elapsed as u128 / vesting_duration as u128) as u64;
-    let total_vested = tge_amount + linear_vested;
-    
-    total_vested
+
+    tge_amount + linear_vested
 }

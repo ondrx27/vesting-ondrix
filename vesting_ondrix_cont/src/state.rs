@@ -7,7 +7,7 @@ use solana_program::{
 pub const MAX_RECIPIENTS: usize = 10;
 pub const BASIS_POINTS_TOTAL: u16 = 10000;  // ✅ CRITICAL FIX: 10000 = 100% for precision
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Recipient {
     pub wallet: Pubkey,
     pub basis_points: u16,  // ✅ CRITICAL FIX: Use basis points (0-10000) for precision
@@ -15,18 +15,7 @@ pub struct Recipient {
     pub last_claim_time: i64,
 }
 
-impl Default for Recipient {
-    fn default() -> Self {
-        Self {
-            wallet: Pubkey::default(),
-            basis_points: 0,  // ✅ CRITICAL FIX: Use basis points
-            claimed_amount: 0,
-            last_claim_time: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct VestingSchedule {
     /// Cliff период в секундах от start_time
     pub cliff_period: i64,
@@ -34,16 +23,6 @@ pub struct VestingSchedule {
     pub vesting_period: i64,
     /// Basis points выпуска в TGE (Token Generation Event) - 0-10000
     pub tge_basis_points: u16,  // ✅ CRITICAL FIX: Use basis points for precision
-}
-
-impl Default for VestingSchedule {
-    fn default() -> Self {
-        Self {
-            cliff_period: 0,
-            vesting_period: 0,
-            tge_basis_points: 0,  // ✅ CRITICAL FIX: Use basis points
-        }
-    }
 }
 
 // ✅ Безопасная структура VestingAccount с дополнительными полями
@@ -142,7 +121,7 @@ impl Pack for VestingAccount {
         let mut recipients = [Recipient::default(); MAX_RECIPIENTS];
         let mut offset = 141; 
         
-        for i in 0..MAX_RECIPIENTS {
+        for (i, recipient) in recipients.iter_mut().enumerate() {
             let wallet = Pubkey::new_from_array(
                 src[offset..offset + 32].try_into()
                     .map_err(|_| ProgramError::InvalidAccountData)?
@@ -159,18 +138,18 @@ impl Pack for VestingAccount {
                 src[offset + 42..offset + 50].try_into()
                     .map_err(|_| ProgramError::InvalidAccountData)?
             );
-            
+
             if i < recipient_count as usize {
-                recipients[i] = Recipient { 
-                    wallet, 
-                    basis_points, 
+                *recipient = Recipient {
+                    wallet,
+                    basis_points,
                     claimed_amount,
                     last_claim_time,
                 };
             } else {
-                recipients[i] = Recipient::default();
+                *recipient = Recipient::default();
             }
-            offset += 50; 
+            offset += 50;
         }
 
         Ok(VestingAccount {
