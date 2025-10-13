@@ -1,0 +1,109 @@
+name: Vesting Solana Security Scan
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  security-audit:
+    name: Cargo Audit & Clippy (Solana Vesting)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./vesting_ondrix_cont
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: vesting_ondrix_cont/target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install Anchor
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor --tag v0.29.0 anchor-cli --locked || true
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        run: |
+          cargo audit --json > cargo-audit.json || true
+          cargo audit > cargo-audit.txt || true
+        continue-on-error: true
+
+      - name: Run cargo clippy
+        run: |
+          cargo clippy --all-targets --all-features -- -D warnings > clippy-output.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Build project
+        run: |
+          anchor build > build-output.txt 2>&1 || cargo build --release > build-output.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Run Anchor tests
+        run: |
+          anchor test > anchor-test.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Upload audit artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vesting-solana-security-reports
+          path: |
+            vesting_ondrix_cont/cargo-audit.json
+            vesting_ondrix_cont/cargo-audit.txt
+            vesting_ondrix_cont/clippy-output.txt
+            vesting_ondrix_cont/anchor-test.txt
+            vesting_ondrix_cont/build-output.txt
+          retention-days: 30
+
+      - name: Display results summary
+        if: always()
+        run: |
+          echo "=== Cargo Audit Summary ==="
+          if [ -f cargo-audit.txt ]; then
+            head -n 50 cargo-audit.txt
+          fi
+          echo ""
+          echo "=== Clippy Summary ==="
+          if [ -f clippy-output.txt ]; then
+            head -n 50 clippy-output.txt
+          fi
+          echo ""
+          echo "=== Anchor Test Summary ==="
+          if [ -f anchor-test.txt ]; then
+            tail -n 30 anchor-test.txt
+          fi

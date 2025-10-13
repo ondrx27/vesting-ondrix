@@ -1,0 +1,101 @@
+name: Vesting EVM Security Scan
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  security-audit:
+    name: Slither & Mythril (BNB Vesting)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./bnb_vesting_ondrix
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v3
+        with:
+          path: bnb_vesting_ondrix/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Slither
+        run: |
+          pip3 install slither-analyzer
+          pip3 install solc-select
+          solc-select install 0.8.20
+          solc-select use 0.8.20
+
+      - name: Install Mythril
+        run: |
+          pip3 install mythril
+        continue-on-error: true
+
+      - name: Run Slither analysis
+        run: |
+          slither . --json slither-report.json || true
+          slither . > slither-report.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Run Mythril analysis
+        run: |
+          find contracts -name "*.sol" -exec myth analyze {} --solv 0.8.20 -o json \; > mythril-report.json 2>&1 || true
+          find contracts -name "*.sol" -exec myth analyze {} --solv 0.8.20 \; > mythril-report.txt 2>&1 || true
+        continue-on-error: true
+        timeout-minutes: 30
+
+      - name: Compile contracts
+        run: |
+          npx hardhat compile > compile-output.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Run tests
+        run: |
+          npx hardhat test > test-output.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Upload audit artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vesting-evm-security-reports
+          path: |
+            bnb_vesting_ondrix/slither-report.json
+            bnb_vesting_ondrix/slither-report.txt
+            bnb_vesting_ondrix/mythril-report.json
+            bnb_vesting_ondrix/mythril-report.txt
+            bnb_vesting_ondrix/compile-output.txt
+            bnb_vesting_ondrix/test-output.txt
+          retention-days: 30
+
+      - name: Display results summary
+        if: always()
+        run: |
+          echo "=== Slither Summary ==="
+          if [ -f slither-report.txt ]; then
+            head -n 100 slither-report.txt
+          fi
+          echo ""
+          echo "=== Mythril Summary ==="
+          if [ -f mythril-report.txt ]; then
+            head -n 50 mythril-report.txt
+          fi
