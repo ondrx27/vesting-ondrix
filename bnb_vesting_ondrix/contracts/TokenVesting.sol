@@ -283,17 +283,19 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         uint256 balanceBefore = token.balanceOf(address(this));
         uint256 allowanceBefore = token.allowance(msg.sender, address(this));
         require(allowanceBefore >= _amount, "Insufficient allowance");
-        
+
+        // CEI Pattern: Calculate values first
         token.safeTransferFrom(msg.sender, address(this), _amount);
-        
+
         uint256 balanceAfter = token.balanceOf(address(this));
         uint256 actualReceived = balanceAfter - balanceBefore;
-        
+
         if (actualReceived < _amount) {
             require(actualReceived >= MINIMUM_VESTING_AMOUNT, "Received amount too small after fees");
-            _amount = actualReceived; 
+            _amount = actualReceived;
         }
 
+        // Then update all state (after knowing the actual amount)
         schedule.totalAmount = _amount;
         schedule.startTime = block.timestamp;
         schedule.isFinalized = true;
@@ -348,21 +350,21 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
             }
         }
         
-        // SECURE: First do all transfers, then update state
-        for (uint8 i = 0; i < transferCount; i++) {
-            Recipient storage recipient = schedule.recipients[transfers[i].recipientIndex];
-            token.safeTransfer(recipient.wallet, transfers[i].amount);
-            emit TokensDistributed(_beneficiary, recipient.wallet, transfers[i].amount, block.timestamp);
-        }
-        
-        // Then update claimed amounts and timestamps
+        // CEI Pattern: Update state BEFORE external calls
+        // First update all state variables
         for (uint8 i = 0; i < transferCount; i++) {
             Recipient storage recipient = schedule.recipients[transfers[i].recipientIndex];
             recipient.claimedAmount += transfers[i].amount;
             recipient.lastClaimTime = block.timestamp;
         }
-
         schedule.lastDistributionTime = block.timestamp;
+
+        // Then do all external calls (transfers)
+        for (uint8 i = 0; i < transferCount; i++) {
+            Recipient storage recipient = schedule.recipients[transfers[i].recipientIndex];
+            token.safeTransfer(recipient.wallet, transfers[i].amount);
+            emit TokensDistributed(_beneficiary, recipient.wallet, transfers[i].amount, block.timestamp);
+        }
     }
 
     function _claimForRecipient(address _beneficiary, address _recipient) internal {
@@ -388,12 +390,13 @@ contract ProductionTokenVesting is ReentrancyGuard, Ownable {
         uint256 claimableAmount = _calculateRecipientClaimableAmount(_beneficiary, _recipient);
         require(claimableAmount > 0, "No tokens available for recipient");
 
-        // SECURE: First transfer, then update state
-        IERC20 token = IERC20(schedule.token);
-        token.safeTransfer(_recipient, claimableAmount);
-        
+        // CEI Pattern: Update state BEFORE external call
         recipient.claimedAmount += claimableAmount;
         recipient.lastClaimTime = block.timestamp;
+
+        // Then do external call (transfer)
+        IERC20 token = IERC20(schedule.token);
+        token.safeTransfer(_recipient, claimableAmount);
 
         emit TokensClaimed(_beneficiary, _recipient, claimableAmount, block.timestamp);
     }
