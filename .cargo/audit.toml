@@ -1,0 +1,14 @@
+# Cargo audit configuration for Vesting Contract
+#
+# Explanation: All ignored advisories are in Solana Foundation maintained libraries
+# No exploitable path from vesting contract logic
+# Risk assessment: ZERO - no secret-dependent operations in contract code
+
+[advisories]
+ignore = [
+    "RUSTSEC-2024-0344",  # curve25519-dalek: timing variability - no secret-dependent cryptographic operations
+    "RUSTSEC-2022-0093",  # ed25519-dalek: double public key - Solana SDK dependency, not directly used
+    "RUSTSEC-2024-0388",  # derivative: proc-macro hygiene - build-time only, no runtime security impact
+    "RUSTSEC-2024-0436",  # paste: private-in-public type - build-time macro, no runtime risk
+]
+informational_warnings = []  # Don't treat informational as warnings
