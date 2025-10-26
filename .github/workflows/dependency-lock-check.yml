@@ -1,0 +1,156 @@
+name: Dependency Lock Check
+
+on:
+  pull_request:
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '.github/workflows/dependency-lock-check.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - '**/Cargo.toml'
+      - '**/package.json'
+      - '.github/workflows/dependency-lock-check.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  check-solana-dependencies:
+    name: Check Solana Contract Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check Solana Cargo.toml changes
+        id: check_cargo
+        run: |
+          if git diff HEAD^ HEAD --name-only | grep -q "solana_vesting_ondrix_cont/Cargo.toml"; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "⚠️  Solana Cargo.toml was modified!"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "✓ Solana Cargo.toml not modified"
+          fi
+
+      - name: Verify Solana exact versions
+        if: steps.check_cargo.outputs.changed == 'true'
+        working-directory: ./solana_vesting_ondrix_cont
+        run: |
+          echo "=== Checking Cargo.toml for exact version locks ==="
+          echo ""
+
+          # Check for dependency lines without = prefix in version string
+          # Exclude [package] metadata and [lib] section
+          INVALID_DEPS=$(grep -E '^[a-z0-9_-]+ = "' Cargo.toml | grep -v 'name = "' | grep -v 'version = "' | grep -v 'edition = "' | grep -v 'crate-type' | grep -E '= "[^=]' || true)
+
+          if [ -n "$INVALID_DEPS" ]; then
+            echo "❌ ERROR: All dependencies must use exact versions"
+            echo ""
+            echo "Found dependencies without exact version lock:"
+            echo "$INVALID_DEPS"
+            echo ""
+            echo "Required format:"
+            echo "  solana-program = \"=2.0\""
+            echo "  spl-token = { version = \"=6.0\", ... }"
+            echo ""
+            exit 1
+          fi
+
+          echo "✅ Solana dependencies use exact versions"
+
+  check-evm-dependencies:
+    name: Check BNB Contract Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check BNB package.json changes
+        id: check_npm
+        run: |
+          if git diff HEAD^ HEAD --name-only | grep -q "bnb_vesting_ondrix/package.json"; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "⚠️  BNB package.json was modified!"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "✓ BNB package.json not modified"
+          fi
+
+      - name: Verify NPM exact versions
+        if: steps.check_npm.outputs.changed == 'true'
+        working-directory: ./bnb_vesting_ondrix
+        run: |
+          echo "=== Checking package.json for version locks ==="
+          echo ""
+
+          # Check for ^ or ~ in dependencies
+          if jq -r '.dependencies // {} | to_entries[] | "\(.key): \(.value)"' package.json | grep -E '[\^~]'; then
+            echo ""
+            echo "❌ ERROR: Dependencies must NOT use ^ or ~ prefixes"
+            echo ""
+            echo "Required format:"
+            echo "  \"@openzeppelin/contracts\": \"5.0.0\"  (no ^)"
+            echo ""
+            exit 1
+          fi
+
+          echo "✅ NPM dependencies locked without ^ or ~"
+
+      - name: Setup Node.js
+        if: steps.check_npm.outputs.changed == 'true'
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Verify package-lock.json is in sync
+        if: steps.check_npm.outputs.changed == 'true'
+        working-directory: ./bnb_vesting_ondrix
+        run: |
+          npm ci --dry-run || {
+            echo "❌ ERROR: package-lock.json is out of sync"
+            echo "Run: npm install"
+            exit 1
+          }
+          echo "✅ package-lock.json is in sync"
+
+  security-review-alert:
+    name: Security Review Required
+    runs-on: ubuntu-latest
+    needs: [check-solana-dependencies, check-evm-dependencies]
+    if: always()
+
+    steps:
+      - name: Alert for review
+        run: |
+          echo ""
+          echo "================================================"
+          echo "  ⚠️  DEPENDENCY LOCK VERIFICATION"
+          echo "================================================"
+          echo ""
+          echo "Security Review Checklist:"
+          echo ""
+          echo "Solana Contract:"
+          echo "  ✓ All Cargo.toml versions use exact match (=2.0)"
+          echo "  ✓ Run 'cargo audit' in solana_vesting_ondrix_cont/"
+          echo "  ✓ Run 'cargo build-sbf' to verify build"
+          echo ""
+          echo "BNB Contract:"
+          echo "  ✓ No ^ or ~ in package.json dependencies"
+          echo "  ✓ Run 'npm install' and commit package-lock.json"
+          echo "  ✓ Run 'npx hardhat compile' to verify"
+          echo ""
+          echo "Both contracts:"
+          echo "  ✓ Update audit.toml if new advisories appear"
+          echo "  ✓ Document reason for dependency changes"
+          echo "  ✓ Security team approval obtained"
+          echo ""
+          echo "================================================"
