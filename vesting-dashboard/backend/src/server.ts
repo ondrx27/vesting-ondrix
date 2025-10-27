@@ -4,6 +4,14 @@ import cors from 'cors';
 import { Server } from 'socket.io';
 import http from 'http';
 import AutoDistributionService from './services/AutoDistributionService';
+import { 
+  sanitizeRequestBody, 
+  sanitizeHeaders, 
+  sanitizeQueryParams, 
+  securityHeaders, 
+  requestSizeLimit 
+} from './middleware/security';
+import { ErrorHandler } from './utils/errorHandler';
 
 const app = express();
 const server = http.createServer(app);
@@ -40,8 +48,17 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 }));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Security middleware - apply early in middleware stack
+app.use(securityHeaders);
+app.use(requestSizeLimit(1024 * 1024)); // 1MB limit
+app.use(sanitizeHeaders);
+
+app.use(express.json({ limit: '1mb' })); // Reduced from 10mb for security
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Apply sanitization after body parsing
+app.use(sanitizeRequestBody);
+app.use(sanitizeQueryParams);
 
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
@@ -329,6 +346,9 @@ app.use('*', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Global error handler - must be last middleware
+app.use(ErrorHandler.globalErrorHandler());
 
 io.on('connection', (socket) => {
   console.log('👤 Client connected:', socket.id);

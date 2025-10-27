@@ -4,6 +4,7 @@ import { ClaimResponse, UserPermission, VestingRecipient } from '../types';
 import { BNB_VESTING_ABI, getContractConfig, KNOWN_ADDRESSES } from '../config/contracts';
 import { isAddressEqual } from '../utils/validation';
 import { logger } from '../utils/logger';
+import { ErrorHandler } from '../utils/errorHandler';
 
 export class BNBService {
   private provider: ethers.JsonRpcProvider;
@@ -81,12 +82,33 @@ export class BNBService {
         claimableAmount,
         recipients: recipients.map((r: any) => ({
           wallet: r.wallet,
-          percentage: Number(r.percentage)
+          basisPoints: Number(r.basisPoints),
+          percentage: Number(r.basisPoints) / 100  // Convert basis points to percentage
         }))
       };
     } catch (error) {
       logger.error('Error getting vesting info', { error, beneficiaryAddress });
       throw error;
+    }
+  }
+
+  async getRecipientClaimInfo(beneficiaryAddress: string, recipientAddress: string) {
+    try {
+      const canClaim = await this.contract.canClaim(beneficiaryAddress, recipientAddress);
+      const claimableAmount = await this.contract.getRecipientClaimableAmount(beneficiaryAddress, recipientAddress);
+      
+      return {
+        canClaim,
+        claimableAmount,
+        recipientAddress
+      };
+    } catch (error) {
+      logger.error('Failed to get recipient claim info', { error, beneficiaryAddress, recipientAddress });
+      return {
+        canClaim: false,
+        claimableAmount: 0n,
+        recipientAddress
+      };
     }
   }
 
@@ -98,6 +120,17 @@ export class BNBService {
         beneficiaryAddress,
         userAddress
       });
+
+      // Check user permissions to determine claim method
+      const permission = await this.verifyUserPermission(userAddress, beneficiaryAddress);
+      
+      if (!permission.allowed) {
+        return {
+          success: false,
+          error: 'User not authorized to claim for this beneficiary',
+          timestamp: new Date().toISOString()
+        };
+      }
 
       // Get vesting information
       const vestingInfo = await this.getVestingInfo(beneficiaryAddress);
@@ -117,33 +150,43 @@ export class BNBService {
         maxFeePerGas: gasPrice.maxFeePerGas?.toString()
       });
 
-      // Estimate gas for the transaction
       let gasEstimate: bigint;
-      try {
-        gasEstimate = await this.contract.claimTokens.estimateGas();
-        logger.debug('Gas estimate', { gasEstimate: gasEstimate.toString() });
-      } catch (estimateError) {
-        logger.error('Gas estimation failed', estimateError);
+      let tx: any;
+
+      if (permission.role === 'initializer') {
+        // ✅ RESTORED: Backend BNB distribution from beneficiary
+        logger.info('Executing BNB distribution from initializer/beneficiary');
+        gasEstimate = await this.contract.distributeTokens.estimateGas(beneficiaryAddress);
+        tx = await this.contract.distributeTokens(beneficiaryAddress, {
+          gasLimit: gasEstimate + BigInt(50000),
+          gasPrice: gasPrice.gasPrice
+        });
+
+      } else if (permission.role === 'recipient') {
+        // ✅ CHANGED: Recipients should use frontend direct claim, not backend
+        logger.info('Recipient claim request - redirecting to frontend direct claim');
         return {
           success: false,
-          error: 'Transaction would fail - please check contract state',
+          error: 'Recipients should use the "Claim My Tokens" button on the website for direct MetaMask claiming. Backend claims are only for initializers.',
+          timestamp: new Date().toISOString()
+        };
+
+      } else {
+        return {
+          success: false,
+          error: 'User role not supported for claiming',
           timestamp: new Date().toISOString()
         };
       }
 
-      // Execute the claim transaction
-      const tx = await this.contract.claimTokens({
-        gasLimit: gasEstimate + BigInt(50000), // Add buffer
-        gasPrice: gasPrice.gasPrice || ethers.parseUnits('10', 'gwei')
-      });
-
       logger.info('Transaction submitted', {
         txHash: tx.hash,
-        gasLimit: (gasEstimate + BigInt(50000)).toString()
+        gasLimit: (gasEstimate + BigInt(50000)).toString(),
+        method: permission.role === 'initializer' ? 'distributeTokens' : 'claimTokens'
       });
 
       // Wait for confirmation
-      const receipt = await tx.wait(1); // Wait for 1 confirmation
+      const receipt = await tx.wait(1);
       
       if (!receipt || receipt.status !== 1) {
         throw new Error('Transaction failed or was reverted');
@@ -155,53 +198,70 @@ export class BNBService {
         gasUsed: receipt.gasUsed?.toString()
       });
 
-      // Calculate distribution amounts
-      const distributionAmounts = vestingInfo.recipients.map((recipient: VestingRecipient) => ({
-        address: recipient.wallet,
-        amount: ((vestingInfo.claimableAmount * BigInt(recipient.percentage)) / 100n).toString(),
-        percentage: recipient.percentage
-      }));
+      // Calculate distribution amounts based on role
+      let distributionAmounts;
+      let totalDistributed: string;
+
+      if (permission.role === 'initializer') {
+        // Initializer distributes to all recipients
+        distributionAmounts = vestingInfo.recipients.map((recipient: VestingRecipient) => {
+          const percentage = recipient.percentage || (recipient.basisPoints / 100);
+          return {
+            address: recipient.wallet,
+            amount: ((vestingInfo.claimableAmount * BigInt(Math.floor(percentage))) / 100n).toString(),
+            percentage: percentage
+          };
+        });
+        totalDistributed = vestingInfo.claimableAmount.toString();
+      } else {
+        // Recipient gets only their share
+        const recipientData = vestingInfo.recipients[permission.recipientIndex!];
+        const percentage = recipientData.percentage || (recipientData.basisPoints / 100);
+        const recipientShare = (vestingInfo.claimableAmount * BigInt(Math.floor(percentage))) / 100n;
+        distributionAmounts = [{
+          address: userAddress,
+          amount: recipientShare.toString(),
+          percentage: percentage
+        }];
+        totalDistributed = recipientShare.toString();
+      }
 
       const executionTime = Date.now() - startTime;
       logger.info('BNB claim completed successfully', {
         executionTime: `${executionTime}ms`,
-        distributedAmount: vestingInfo.claimableAmount.toString(),
-        recipientCount: vestingInfo.recipients.length
+        distributedAmount: totalDistributed,
+        recipientCount: distributionAmounts.length,
+        role: permission.role
       });
 
       return {
         success: true,
         transactionHash: receipt.hash,
-        distributedAmount: vestingInfo.claimableAmount.toString(),
+        distributedAmount: totalDistributed,
         recipients: distributionAmounts,
         timestamp: new Date().toISOString()
       };
 
     } catch (error: any) {
       const executionTime = Date.now() - startTime;
-      logger.error('BNB claim execution failed', {
-        error: error.message,
-        executionTime: `${executionTime}ms`,
-        beneficiaryAddress,
-        userAddress
-      });
-
-      // Parse error message for user-friendly response
-      let errorMessage = 'Failed to execute claim transaction';
       
-      if (error.message.includes('insufficient funds')) {
-        errorMessage = 'Insufficient gas funds in executor wallet';
-      } else if (error.message.includes('revert')) {
-        errorMessage = 'Transaction reverted - possibly no tokens to claim or contract issue';
-      } else if (error.message.includes('nonce')) {
-        errorMessage = 'Transaction nonce error - please try again';
-      } else if (error.message.includes('gas')) {
-        errorMessage = 'Gas estimation failed - transaction would likely fail';
-      }
+      // Log error with full details
+      ErrorHandler.logAndGetSafeError(
+        error,
+        'BNB claim execution',
+        {
+          executionTime: `${executionTime}ms`,
+          beneficiaryAddress,
+          userAddress
+        }
+      );
+
+      // Get safe blockchain-specific error message
+      const safeError = ErrorHandler.handleBlockchainError(error, 'bnb');
 
       return {
         success: false,
-        error: errorMessage,
+        error: safeError.message,
         timestamp: new Date().toISOString()
       };
     }
@@ -242,9 +302,16 @@ export class BNBService {
 
     } catch (error: any) {
       logger.error('BNB service health check failed', error);
+      const safeError = ErrorHandler.logAndGetSafeError(
+        error,
+        'BNB service health check',
+        {},
+        'BNB service unavailable'
+      );
+      
       return {
         healthy: false,
-        error: error.message
+        error: safeError.message
       };
     }
   }

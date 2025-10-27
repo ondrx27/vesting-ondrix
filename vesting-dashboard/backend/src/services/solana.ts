@@ -18,10 +18,11 @@ import { ClaimResponse, UserPermission } from '../types';
 import { getContractConfig } from '../config/contracts';
 import { isAddressEqual } from '../utils/validation';
 import { logger } from '../utils/logger';
+import { ErrorHandler } from '../utils/errorHandler';
 
 interface SolanaRecipient {
   wallet: string;
-  percentage: number;
+  basisPoints: number;  // ✅ UPDATED: Use basis points instead of percentage
   claimedAmount: string;
   lastClaimTime: number;
 }
@@ -35,10 +36,11 @@ interface SolanaVestingData {
   totalAmount: string;
   cliffPeriod: number;
   vestingPeriod: number;
-  tgePercentage: number;
+  tgeBasisPoints: number;  // ✅ UPDATED: Use basis points for TGE
   recipients: SolanaRecipient[];
   recipientCount: number;
-  isRevoked: boolean;
+  isFinalized: boolean;  // ✅ UPDATED: New field from contract
+  lastDistributionTime: number;  // ✅ UPDATED: New field from contract
 }
 
 export class SolanaService {
@@ -115,8 +117,9 @@ export class SolanaService {
 
   private parseVestingAccount(data: Buffer): SolanaVestingData | null {
     try {
-      if (data.length < 200) {
-        throw new Error('Invalid account data length');
+      // ✅ UPDATED: Expected size with basis points (u16 instead of u8) and new fields
+      if (data.length < 640) {  // Updated minimum size
+        throw new Error(`Invalid account data length: ${data.length}, expected at least 640`);
       }
 
       let offset = 0;
@@ -145,22 +148,34 @@ export class SolanaService {
       const vestingPeriod = Number(this.readInt64LE(data, offset));
       offset += 8;
       
-      const tgePercentage = data[offset];
-      offset += 1;
+      // ✅ UPDATED: TGE basis points (u16 instead of u8)
+      const tgeBasisPoints = data.readUInt16LE(offset);
+      offset += 2;
       
       const recipientCount = data[offset];
       offset += 1;
       
-      const isRevoked = data[offset] !== 0;
+      // ✅ UPDATED: New fields from contract
+      const isFinalized = data[offset] !== 0;
       offset += 1;
+
+      const lastDistributionTime = Number(this.readInt64LE(data, offset));
+      offset += 8;
 
       const recipients: SolanaRecipient[] = [];
       for (let i = 0; i < Math.min(recipientCount, 10); i++) {
+        // ✅ UPDATED: Each recipient now 50 bytes (32 + 2 + 8 + 8)
+        if (offset + 50 > data.length) {
+          logger.warn(`Not enough data for recipient ${i}, stopping parsing`);
+          break;
+        }
+
         const wallet = new PublicKey(data.slice(offset, offset + 32)).toString();
         offset += 32;
         
-        const percentage = data[offset];
-        offset += 1;
+        // ✅ UPDATED: Basis points (u16) instead of percentage (u8)
+        const basisPoints = data.readUInt16LE(offset);
+        offset += 2;
         
         const claimedAmount = this.readUint64LE(data, offset);
         offset += 8;
@@ -168,10 +183,10 @@ export class SolanaService {
         const lastClaimTime = Number(this.readInt64LE(data, offset));
         offset += 8;
 
-        if (percentage > 0) {
+        if (basisPoints > 0) {
           recipients.push({
             wallet,
-            percentage,
+            basisPoints,  // ✅ UPDATED: Use basis points
             claimedAmount: claimedAmount.toString(),
             lastClaimTime
           });
@@ -187,10 +202,11 @@ export class SolanaService {
         totalAmount: totalAmount.toString(),
         cliffPeriod,
         vestingPeriod,
-        tgePercentage,
+        tgeBasisPoints,  // ✅ UPDATED: Use basis points
         recipients,
         recipientCount,
-        isRevoked
+        isFinalized,  // ✅ UPDATED: New field
+        lastDistributionTime  // ✅ UPDATED: New field
       };
 
     } catch (error) {
@@ -213,21 +229,42 @@ export class SolanaService {
     return value;
   }
 
-  private calculateVestedAmount(totalAmount: bigint, elapsedSeconds: number): bigint {
-    let percentage: number;
-    if (elapsedSeconds < 0) {
-      percentage = 0;
-    } else if (elapsedSeconds < 300) { 
-      percentage = 10;
-    } else if (elapsedSeconds < 600) { 
-      percentage = 20;
-    } else if (elapsedSeconds < 900) { 
-      percentage = 50;
-    } else {  
-      percentage = 100;
+  private calculateVestedAmount(
+    totalAmount: bigint, 
+    currentTime: number, 
+    startTime: number, 
+    cliffPeriod: number, 
+    vestingPeriod: number, 
+    tgeBasisPoints: number
+  ): bigint {
+    // ✅ UPDATED: Use proper TGE + linear vesting calculation with basis points
+    if (currentTime < startTime) {
+      return 0n;
+    }
+
+    const elapsed = currentTime - startTime;
+    
+    // Calculate TGE amount using basis points (10000 = 100%)
+    const tgeAmount = (totalAmount * BigInt(tgeBasisPoints)) / 10000n;
+    
+    // If still before cliff, only TGE is available
+    if (elapsed < cliffPeriod) {
+      return tgeAmount;
     }
     
-    return (totalAmount * BigInt(percentage)) / 100n;
+    // If vesting period is complete, return all tokens
+    if (elapsed >= vestingPeriod) {
+      return totalAmount;
+    }
+    
+    // Linear vesting between cliff and end
+    const vestingAmount = totalAmount - tgeAmount;
+    const vestingDuration = vestingPeriod - cliffPeriod;
+    const vestingElapsed = elapsed - cliffPeriod;
+    
+    const linearVested = (vestingAmount * BigInt(vestingElapsed)) / BigInt(vestingDuration);
+    
+    return tgeAmount + linearVested;
   }
 
   async executeClaim(vestingPDA: string, userAddress: string): Promise<ClaimResponse> {
@@ -239,6 +276,17 @@ export class SolanaService {
         userAddress
       });
 
+      // Check user permissions - only initializer can claim for Solana
+      const permission = await this.verifyUserPermission(userAddress, vestingPDA);
+      
+      if (!permission.allowed || permission.role !== 'initializer') {
+        return {
+          success: false,
+          error: 'Only the initializer can execute claims for Solana vesting',
+          timestamp: new Date().toISOString()
+        };
+      }
+
       const vestingData = await this.getVestingAccountData(vestingPDA);
       
       if (!vestingData) {
@@ -249,13 +297,8 @@ export class SolanaService {
         };
       }
 
-      if (vestingData.isRevoked) {
-        return {
-          success: false,
-          error: 'Vesting has been revoked',
-          timestamp: new Date().toISOString()
-        };
-      }
+      // ✅ REMOVED: isRevoked check since field was deleted from contract for immutability
+      // Vesting can never be revoked now - this ensures complete immutability after finalization
 
       if (vestingData.startTime === 0) {
         return {
@@ -266,10 +309,16 @@ export class SolanaService {
       }
 
       const currentTime = Math.floor(Date.now() / 1000);
-      const elapsedTime = currentTime - vestingData.startTime;
       
       const totalAmount = BigInt(vestingData.totalAmount);
-      const vestedAmount = this.calculateVestedAmount(totalAmount, elapsedTime);
+      const vestedAmount = this.calculateVestedAmount(
+        totalAmount,
+        currentTime,
+        vestingData.startTime,
+        vestingData.cliffPeriod,
+        vestingData.vestingPeriod,
+        vestingData.tgeBasisPoints
+      );
       
       const totalClaimed = vestingData.recipients.reduce((sum: bigint, recipient: SolanaRecipient) => {
         return sum + BigInt(recipient.claimedAmount);
@@ -288,9 +337,13 @@ export class SolanaService {
       logger.info('Claimable amount calculated', {
         vestedAmount: vestedAmount.toString(),
         totalClaimed: totalClaimed.toString(),
-        claimableAmount: claimableAmount.toString()
+        claimableAmount: claimableAmount.toString(),
+        elapsedTime: currentTime - vestingData.startTime,
+        currentTime,
+        startTime: vestingData.startTime
       });
 
+      // Create transaction with compute budget first
       const transaction = new Transaction();
       
       transaction.add(
@@ -301,11 +354,34 @@ export class SolanaService {
       const vestingPubkey = new PublicKey(vestingPDA);
       const vaultPubkey = new PublicKey(vestingData.vault);
 
+      // Calculate vault authority PDA (same as in 3-claim.js)
+      const [vaultAuthority] = await PublicKey.findProgramAddress(
+        [Buffer.from('authority'), vestingPubkey.toBuffer()],
+        this.programId
+      );
+
+      logger.info('Vault authority calculated', {
+        vaultAuthority: vaultAuthority.toBase58()
+      });
+
+      // Create/check ATAs for all recipients
       const recipientATAs: PublicKey[] = [];
-      for (const recipient of vestingData.recipients) {
+      logger.info('Preparing recipient ATAs', {
+        recipientCount: vestingData.recipients.length
+      });
+
+      for (let i = 0; i < vestingData.recipients.length; i++) {
+        const recipient = vestingData.recipients[i];
         const recipientPubkey = new PublicKey(recipient.wallet);
         const ata = await getAssociatedTokenAddress(mintPubkey, recipientPubkey);
         recipientATAs.push(ata);
+
+        logger.debug(`Processing recipient ${i + 1}`, {
+          wallet: recipient.wallet,
+          basisPoints: recipient.basisPoints,
+          percentage: recipient.basisPoints / 100,  // ✅ UPDATED: Show as percentage for logging
+          ata: ata.toBase58()
+        });
 
         try {
           await getAccount(this.connection, ata);
@@ -314,41 +390,41 @@ export class SolanaService {
           logger.info(`Creating ATA for ${recipient.wallet}`);
           transaction.add(
             createAssociatedTokenAccountInstruction(
-              this.keypair.publicKey,
-              ata,
-              recipientPubkey,
-              mintPubkey
+              this.keypair.publicKey, // payer
+              ata,                   // ata
+              recipientPubkey,       // owner  
+              mintPubkey             // mint
             )
           );
         }
       }
 
-      const [vaultAuthority] = await PublicKey.findProgramAddress(
-        [Buffer.from('authority'), vestingPubkey.toBuffer()],
-        this.programId
-      );
-
+      // Create claim instruction (instruction 2 as per 3-claim.js)
       const claimInstruction = new TransactionInstruction({
         programId: this.programId,
         keys: [
-          { pubkey: this.keypair.publicKey, isSigner: true, isWritable: true },
-          { pubkey: vestingPubkey, isSigner: false, isWritable: true },
-          { pubkey: vaultPubkey, isSigner: false, isWritable: true },
-          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-          { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
-          { pubkey: vaultAuthority, isSigner: false, isWritable: false },
+          { pubkey: this.keypair.publicKey, isSigner: true, isWritable: true },  // 0. Initializer (signer)
+          { pubkey: vestingPubkey, isSigner: false, isWritable: true },          // 1. Vesting PDA
+          { pubkey: vaultPubkey, isSigner: false, isWritable: true },            // 2. Vault PDA
+          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },      // 3. Token Program
+          { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },   // 4. Clock Sysvar
+          { pubkey: vaultAuthority, isSigner: false, isWritable: false },        // 5. Vault Authority PDA
           ...recipientATAs.map((ata: PublicKey) => ({ 
             pubkey: ata, 
             isSigner: false, 
             isWritable: true 
-          }))
+          }))  // 6+. Recipient ATAs
         ],
-        data: Buffer.from([2]) 
+        data: Buffer.from([2]) // Instruction 2 = Claim
       });
 
       transaction.add(claimInstruction);
 
-      logger.info('Sending Solana transaction');
+      logger.info('Sending Solana claim transaction', {
+        instructionCount: transaction.instructions.length,
+        recipientATACount: recipientATAs.length,
+        signer: this.keypair.publicKey.toBase58()
+      });
       
       const signature = await sendAndConfirmTransaction(
         this.connection,
@@ -357,6 +433,7 @@ export class SolanaService {
         {
           commitment: 'confirmed',
           preflightCommitment: 'confirmed',
+          skipPreflight: false
         }
       );
 
@@ -365,12 +442,13 @@ export class SolanaService {
         slot: await this.connection.getSlot()
       });
 
+      // ✅ UPDATED: Calculate distribution amounts using basis points
       const distributionAmounts = vestingData.recipients.map((recipient: SolanaRecipient) => {
-        const share = (claimableAmount * BigInt(recipient.percentage)) / 100n;
+        const share = (claimableAmount * BigInt(recipient.basisPoints)) / 10000n;
         return {
           address: recipient.wallet,
           amount: share.toString(),
-          percentage: recipient.percentage
+          percentage: recipient.basisPoints / 100  // Convert basis points to percentage for display
         };
       });
 
@@ -378,7 +456,8 @@ export class SolanaService {
       logger.info('Solana claim completed successfully', {
         executionTime: `${executionTime}ms`,
         distributedAmount: claimableAmount.toString(),
-        recipientCount: vestingData.recipients.length
+        recipientCount: vestingData.recipients.length,
+        role: 'initializer'
       });
 
       return {
@@ -391,29 +470,25 @@ export class SolanaService {
 
     } catch (error: any) {
       const executionTime = Date.now() - startTime;
-      logger.error('Solana claim execution failed', {
-        error: error.message,
-        executionTime: `${executionTime}ms`,
-        vestingPDA,
-        userAddress
-      });
-
-      let errorMessage = 'Failed to execute Solana claim transaction';
       
-      if (error.message.includes('insufficient funds')) {
-        errorMessage = 'Insufficient SOL for transaction fees';
-      } else if (error.message.includes('0x1')) {
-        errorMessage = 'Insufficient account balance';
-      } else if (error.message.includes('0x0')) {
-        errorMessage = 'Transaction instruction failed';
-      } else if (error.logs) {
-        logger.error('Transaction logs', { logs: error.logs });
-        errorMessage = 'Transaction failed - check program state';
-      }
+      // Log error with full details
+      ErrorHandler.logAndGetSafeError(
+        error,
+        'Solana claim execution',
+        {
+          executionTime: `${executionTime}ms`,
+          vestingPDA,
+          userAddress,
+          logs: error.logs || []
+        }
+      );
+
+      // Get safe blockchain-specific error message
+      const safeError = ErrorHandler.handleBlockchainError(error, 'solana');
 
       return {
         success: false,
-        error: errorMessage,
+        error: safeError.message,
         timestamp: new Date().toISOString()
       };
     }
@@ -443,7 +518,7 @@ export class SolanaService {
       logger.error('Solana service health check failed', error);
       return {
         healthy: false,
-        error: error.message
+        error: ErrorHandler.getSafeErrorMessage(error, 'Solana service unavailable')
       };
     }
   }

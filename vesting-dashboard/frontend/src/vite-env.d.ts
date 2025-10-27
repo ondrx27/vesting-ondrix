@@ -17,6 +17,7 @@ interface ImportMetaEnv {
   readonly VITE_BNB_TOKEN_ADDRESS: string;
   readonly VITE_SOLANA_PROGRAM_ID: string;
   readonly VITE_SOLANA_VESTING_PDA: string;
+  readonly VITE_REOWN_PROJECT_ID: string;
 }
 
 interface ImportMeta {

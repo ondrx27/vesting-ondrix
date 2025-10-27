@@ -29,7 +29,8 @@ export function detectChainFromTokenAddress(tokenAddress: string): SupportedChai
 export function formatTokenAmount(
   amount: string, 
   chain: SupportedChain,
-  customDecimals?: number
+  customDecimals?: number,
+  maxDecimals: number = 3
 ): string {
   try {
     if (!amount || amount === '0') return '0';
@@ -54,13 +55,17 @@ export function formatTokenAmount(
       return quotient.toString();
     }
     
-    return `${quotient}.${trimmed}`;
+    // Limit decimal places to maxDecimals
+    const limitedDecimals = trimmed.length > maxDecimals ? trimmed.substring(0, maxDecimals) : trimmed;
+    
+    return `${quotient}.${limitedDecimals}`;
     
   } catch (error) {
     console.error('Error formatting token amount:', {
       amount,
       chain,
       customDecimals,
+      maxDecimals,
       error: error instanceof Error ? error.message : error
     });
     return '0';
@@ -70,8 +75,9 @@ export function formatTokenAmount(
 export function formatTokenAmountByAddress(
   amount: string, 
   tokenAddress: string,
-  customDecimals?: number
+  customDecimals?: number,
+  maxDecimals: number = 3
 ): string {
   const chain = detectChainFromTokenAddress(tokenAddress);
-  return formatTokenAmount(amount, chain, customDecimals);
+  return formatTokenAmount(amount, chain, customDecimals, maxDecimals);
 }

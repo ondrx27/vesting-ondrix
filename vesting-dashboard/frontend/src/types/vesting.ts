@@ -20,12 +20,14 @@ export interface VestingConfig {
 
 export interface Recipient {
   wallet: string;
-  percentage: number;
+  basisPoints: number;  // ✅ UPDATED: Use basis points instead of percentage
+  percentage?: number;  // ✅ LEGACY: Keep for backwards compatibility
   claimedAmount?: string;
   lastClaimTime?: number;
 }
 
 export interface VestingSchedule {
+  chain?: 'bnb' | 'solana';  // ✅ ADD: Chain identifier to handle different logic
   isInitialized: boolean;
   token: string;
   startTime: number;
@@ -34,8 +36,11 @@ export interface VestingSchedule {
   totalAmount: string;
   claimedAmount: string;
   recipientCount: number;
+  tgeBasisPoints?: number;  // ✅ UPDATED: TGE in basis points (Solana only)
+  tgePercentage?: number;   // ✅ LEGACY: Keep for backwards compatibility (Solana only)
   isTestMode?: boolean;
-  isRevoked?: boolean;
+  isFinalized?: boolean;    // ✅ UPDATED: New field from contract
+  lastDistributionTime?: number;  // ✅ UPDATED: New field from contract
 }
 
 export interface VestingProgress {
@@ -84,6 +89,7 @@ export interface ClaimResponse {
   transactionHash?: string;
   error?: string;
   distributedAmount?: string;
+  amount?: string;
   recipients?: Array<{
     address: string;
     amount: string;
@@ -92,44 +98,98 @@ export interface ClaimResponse {
 
 export const BNB_VESTING_ABI = [
   {
-    "inputs": [{"name": "_beneficiary", "type": "address"}],
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_beneficiary",
+        "type": "address"
+      }
+    ],
     "name": "getVestingSchedule",
     "outputs": [
-      {"name": "isInitialized", "type": "bool"},
-      {"name": "token", "type": "address"},
-      {"name": "startTime", "type": "uint256"},
-      {"name": "cliffDuration", "type": "uint256"},
-      {"name": "vestingDuration", "type": "uint256"},
-      {"name": "totalAmount", "type": "uint256"},
-      {"name": "claimedAmount", "type": "uint256"},
-      {"name": "recipientCount", "type": "uint8"},
-      {"name": "isTestMode", "type": "bool"}
+      {
+        "internalType": "bool",
+        "name": "isInitialized",
+        "type": "bool"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "authorizedFunder",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "startTime",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "cliffDuration",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "vestingDuration",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "totalAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "claimedAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint8",
+        "name": "recipientCount",
+        "type": "uint8"
+      }
     ],
     "stateMutability": "view",
     "type": "function"
   },
   {
-    "inputs": [{"name": "_beneficiary", "type": "address"}],
-    "name": "getVestingProgress",
-    "outputs": [
-      {"name": "elapsedTime", "type": "uint256"},
-      {"name": "unlockedPercentage", "type": "uint256"},
-      {"name": "unlockedAmount", "type": "uint256"},
-      {"name": "claimableAmount", "type": "uint256"},
-      {"name": "remainingAmount", "type": "uint256"}
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_beneficiary",
+        "type": "address"
+      }
     ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{"name": "_beneficiary", "type": "address"}],
     "name": "getRecipients",
     "outputs": [
       {
         "components": [
-          {"name": "wallet", "type": "address"},
-          {"name": "percentage", "type": "uint8"}
+          {
+            "internalType": "address",
+            "name": "wallet",
+            "type": "address"
+          },
+          {
+            "internalType": "uint16",
+            "name": "basisPoints",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint256",
+            "name": "claimedAmount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "lastClaimTime",
+            "type": "uint256"
+          }
         ],
+        "internalType": "struct ProductionTokenVesting.Recipient[]",
         "name": "",
         "type": "tuple[]"
       }
@@ -138,46 +198,141 @@ export const BNB_VESTING_ABI = [
     "type": "function"
   },
   {
-    "inputs": [{"name": "_beneficiary", "type": "address"}],
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_beneficiary",
+        "type": "address"
+      }
+    ],
     "name": "getClaimableAmount",
-    "outputs": [{"name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{"name": "_beneficiary", "type": "address"}],
-    "name": "getNextUnlock",
     "outputs": [
-      {"name": "nextUnlockTime", "type": "uint256"},
-      {"name": "nextUnlockPercentage", "type": "uint256"},
-      {"name": "timeRemaining", "type": "uint256"}
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
     ],
     "stateMutability": "view",
     "type": "function"
   },
   {
     "inputs": [
-      {"name": "_elapsedTime", "type": "uint256"},
-      {"name": "_cliffDuration", "type": "uint256"},
-      {"name": "_vestingDuration", "type": "uint256"}
+      {
+        "internalType": "address",
+        "name": "_beneficiary",
+        "type": "address"
+      }
     ],
-    "name": "getUnlockedPercentage",
-    "outputs": [{"name": "", "type": "uint256"}],
-    "stateMutability": "pure",
-    "type": "function"
-  },
-  {
-    "inputs": [{"name": "_beneficiary", "type": "address"}],
-    "name": "getCurrentPeriod",
-    "outputs": [{"name": "", "type": "uint8"}],
+    "name": "canDistribute",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
     "stateMutability": "view",
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "getCurrentTime",
-    "outputs": [{"name": "", "type": "uint256"}],
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_beneficiary",
+        "type": "address"
+      }
+    ],
+    "name": "getVestingProgress",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "elapsedTime",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "unlockedPercentage",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "unlockedAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "claimableAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "remainingAmount",
+        "type": "uint256"
+      }
+    ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_beneficiary",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_recipient",
+        "type": "address"
+      }
+    ],
+    "name": "canClaim",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_beneficiary",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_recipient",
+        "type": "address"
+      }
+    ],
+    "name": "getRecipientClaimableAmount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_beneficiary",
+        "type": "address"
+      }
+    ],
+    "name": "claimTokens",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   }
 ] as const;

@@ -1,0 +1,123 @@
+## **1. CONTRACT ADDRESSES (BSC TESTNET)**
+
+### **ProductionTokenVesting Contract**
+- **Address**: `0xB55BcE33bAe7A29064912eC6226F766Aa9cac75b`
+- **Explorer**: https://testnet.bscscan.com/address/0xB55BcE33bAe7A29064912eC6226F766Aa9cac75b
+- **Chain**: BSC Testnet (Chain ID: 97)
+- **Status**: ACTIVE & FUNDED
+
+### 🪙 **Test Token Contract**  
+- **Address**: `0x99fc144A2407c8C8231225C1561c5513648938dd`
+- **Explorer**: https://testnet.bscscan.com/address/0x99fc144A2407c8C8231225C1561c5513648938dd
+- **Symbol**: TestToken
+- **Decimals**: 18
+- **Total Supply**: Unlimited (mintable)
+
+---
+
+## **COMPLETE TRANSACTION HISTORY & ANALYSIS**
+
+### **Contract Setup Phase**
+
+#### **Initial Configuration Transactions:**
+1. **validateToken()** - Block 63399314: `0xc7a28893836f47268f4f3ad9b92d5fc1969fe8a2dca5ab176a539984ad515bcb`
+   - **Action**: Validate TestToken contract for vesting use
+   - **Gas Fee**: 0.00118944 BNB
+
+2. **authorizeInitializer()** - Block 63399316: `0x734b359f3b9842ac7b8a419bf26f2d514cfd620f67af3bf66561493b9133d0a1`
+   - **Function Code**: `0x498dc61d` 
+   - **Action**: Authorize deployer as vesting initializer
+   - **Gas Fee**: 0.00056092 BNB
+
+3. **validateToken()** - Block 63399535: `0xdab81ed1cc2b47cbd0e80d1fdc4abb9557797fe15340a990b7ebd40ef4be4212`
+   - **Action**: Re-validate token (final confirmation)
+   - **Gas Fee**: 0.00079144 BNB
+
+4. **authorizeInitializer()** - Block 63399537: `0xe0135b91d54ec0a78324139e6e33be516cd5f5c540f7efaa508741543a0fb0a1`
+   - **Function Code**: `0x498dc61d`
+   - **Action**: Final authorization confirmation
+   - **Gas Fee**: 0.00056092 BNB
+
+5. **initializeVesting()** - Block 63399540: `0x9af8cfe213a4ad21f6091ecb51fe0c7aee4c9cbecbb7c79a0afa5ff4461c9f0f`
+   - **Function Code**: `0xbb33d138`
+   - **Action**: Create vesting schedule with 5 recipients
+   - **Parameters**: 5min cliff, 20min total vesting, 1000 basis points allocation
+   - **Gas Fee**: 0.0082912 BNB
+
+6. **fundVesting()** - Block 63399545: `0x938c798b272cd34ce89d6c4a702b0699c0eacfa913462c18fa589b8a9c36db7a`
+   - **Action**: Fund contract with 1000 TestTokens
+   - **Gas Fee**: 0.00243208 BNB
+
+### **Individual Recipient Claims**
+
+7. **First Claim** - Block 63665227: `0x27aa7787fff5aaa8013f424e3dedd2316c1835e7e8a90ae0bd87c7a0f2f28619`
+   - **Claimant**: `0x68E7BD8736DeD1dF80cBe5FD74a50e904F6C6f3F`
+   - **Method**: `claimTokens()`
+   - **Amount**: ~200 tokens (20% allocation)
+   - **Gas Fee**: 0.00001401 BNB
+
+8. **Second Claim** - Block 63839157: `0x02ba9eb6663a69b70f5403b622f341dbb2cf851bd6ecba8429af17472101eb7c`
+   - **Claimant**: `0x4F1536FC181C541f3eF766D227373f55d03CE0bA`
+   - **Method**: `claimTokens()`
+   - **Amount**: ~100 tokens (10% allocation)
+   - **Gas Fee**: 0.0001372 BNB
+
+9. **Third Claim** - Block 63850618: `0x3a4b2ae9a1dfc6036c46a5a8b027730337a5a05b3b06e53e096abbb80dec1813`
+   - **Claimant**: `0x93C25AbB6396a5B6541CF24ce1831D2C87B61817`
+   - **Method**: `claimTokens()`
+   - **Amount**: ~300 tokens (30% allocation)
+   - **Gas Fee**: 0.00014302 BNB
+
+### **Automated Distribution (Backend Service)**
+
+10. **General Distribution** - Block 63856600 (57 minutes ago): `0x47011e136880bd30fac0e4f89c86fd35e2618ff3b0032010e698e05ce5b6a3ad`
+    - **Timestamp**: Sep-01-2025 01:37:51 PM UTC
+    - **Status**: Success (4596 confirmations)
+    - **Initiated By**: Beneficiary `0xea755aBa09CaAc2F73C4b6288256FF4Ae88beFbC` (Auto-claim)
+    - **Function**: `distributeTokens()` (Automated Distribution Service)
+    - **Action**: General distribution initiated by beneficiary for auto-claim
+    - **BEP-20 Token Transfers**: 2 transfers executed
+    - **Recipients Served**:
+      - `0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1`: 200 TVT tokens
+      - `0xD77C534A6E0d89A7e5Fc7De8A1e5B1E2b0F6C4A8`: 200 TVT tokens
+    - **Gas Used**: 0.0000509648 BNB (0.2 Gwei gas price)
+    - **Contract**: ProductionTokenVesting `0xB55BcE33bAe7A29064912eC6226F766Aa9cac75b`
+
+---
+
+
+## **SECURITY AUDIT CONFIRMATION**
+
+### **NO HIDDEN DANGEROUS FUNCTIONS**
+**Verified**: Contract contains NO backdoor functions:
+- No owner sweep/drain functions
+- No pause mechanism  
+- No emergency kill switch
+- No change-beneficiary after initialization
+- No selfdestruct capability
+- No arbitrary token withdrawal by admin
+
+### **FEE-ON-TRANSFER TOKEN SUPPORT**
+** FULLY SUPPORTED** via balance checking pattern:
+```solidity
+uint256 balanceBefore = token.balanceOf(address(this));
+token.safeTransferFrom(msg.sender, address(this), _amount);
+uint256 balanceAfter = token.balanceOf(address(this));
+uint256 actualReceived = balanceAfter - balanceBefore;
+
+if (actualReceived < _amount) {
+    _amount = actualReceived; 
+}
+```
+
+### 🛡️ **SECURITY FEATURES IMPLEMENTED**
+- **ReentrancyGuard** on all transfer functions
+- **SafeERC20** for token operations
+- **Input validation** & sanitization  
+- **Basis points precision** (10000 = 100%)
+- **Role-based access control**
+- **Address validation** & duplicate checks
+- **Cliff/vesting duration limits**
+- **Token validation system**
+
+

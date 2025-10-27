@@ -1,39 +1,72 @@
 import { ethers } from 'ethers';
 import { PublicKey } from '@solana/web3.js';
 import { ClaimRequest, ValidationError } from '../types';
+import { InputSanitizer } from './sanitization';
 
 export function validateClaimRequest(req: ClaimRequest): ValidationError[] {
   const errors: ValidationError[] = [];
 
+  // Sanitize and validate beneficiaryAddress
   if (!req.beneficiaryAddress) {
     errors.push({
       field: 'beneficiaryAddress',
       message: 'Beneficiary address is required'
     });
-  } else if (!isValidAddress(req.beneficiaryAddress, req.chain)) {
-    errors.push({
-      field: 'beneficiaryAddress',
-      message: `Invalid ${req.chain} address format`
-    });
+  } else {
+    try {
+      const sanitizedAddress = InputSanitizer.sanitizeAddress(req.beneficiaryAddress);
+      if (!isValidAddress(sanitizedAddress, req.chain)) {
+        errors.push({
+          field: 'beneficiaryAddress',
+          message: `Invalid ${req.chain} address format`
+        });
+      } else {
+        // Update the request with sanitized value
+        req.beneficiaryAddress = sanitizedAddress;
+      }
+    } catch (sanitizeError: any) {
+      errors.push({
+        field: 'beneficiaryAddress',
+        message: `Invalid beneficiary address: ${sanitizeError.message}`
+      });
+    }
   }
 
+  // Sanitize and validate chain
   if (!req.chain) {
     errors.push({
       field: 'chain',
       message: 'Chain is required'
     });
-  } else if (!['bnb', 'solana'].includes(req.chain)) {
-    errors.push({
-      field: 'chain',
-      message: 'Chain must be either "bnb" or "solana"'
-    });
+  } else {
+    try {
+      req.chain = InputSanitizer.sanitizeChain(req.chain);
+    } catch (sanitizeError: any) {
+      errors.push({
+        field: 'chain',
+        message: sanitizeError.message
+      });
+    }
   }
 
-  if (req.userAddress && !isValidAddress(req.userAddress, req.chain)) {
-    errors.push({
-      field: 'userAddress',
-      message: `Invalid ${req.chain} user address format`
-    });
+  // Sanitize and validate userAddress if provided
+  if (req.userAddress) {
+    try {
+      const sanitizedUserAddress = InputSanitizer.sanitizeAddress(req.userAddress);
+      if (!isValidAddress(sanitizedUserAddress, req.chain)) {
+        errors.push({
+          field: 'userAddress',
+          message: `Invalid ${req.chain} user address format`
+        });
+      } else {
+        req.userAddress = sanitizedUserAddress;
+      }
+    } catch (sanitizeError: any) {
+      errors.push({
+        field: 'userAddress',
+        message: `Invalid user address: ${sanitizeError.message}`
+      });
+    }
   }
 
   return errors;

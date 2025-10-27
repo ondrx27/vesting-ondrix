@@ -1,10 +1,13 @@
-// src/components/WalletConnection.tsx - Чистая версия без troubleshooting
+// src/components/WalletConnection.tsx - Обновленная версия с Reown AppKit
 import React, { useState, useEffect } from 'react';
 import { useWallet } from '../contexts/WalletContext';
+import { ReownAppKitConnect } from './ReownAppkitConnect';
 import { Wallet, LogOut, AlertTriangle } from 'lucide-react';
 import { WalletMultiButton, WalletDisconnectButton } from '@solana/wallet-adapter-react-ui';
+import { ethers } from 'ethers';
 
 export const WalletConnection: React.FC = () => {
+  const [localError, setLocalError] = useState<string | null>(null);
   const { 
     isConnected, 
     address, 
@@ -13,8 +16,54 @@ export const WalletConnection: React.FC = () => {
     error, 
     connect, 
     disconnect,
-    solanaWallet
+    solanaWallet,
+    reownAddress,
+    reownProvider,
+    setReownConnection,
+    disconnectReown
   } = useWallet();
+
+  // Clear local error when global error changes or when connecting
+  useEffect(() => {
+    if (error || isConnecting) {
+      setLocalError(null);
+    }
+  }, [error, isConnecting]);
+
+  const handleReownConnect = (reownAddr: string, reownProv: ethers.BrowserProvider) => {
+    console.log('✅ Reown AppKit connected:', reownAddr);
+    setReownConnection(reownAddr, reownProv);
+    setLocalError(null);
+  };
+
+  const handleReownDisconnect = async () => {
+    console.log('🔌 handleReownDisconnect called - disconnecting Reown');
+    
+    try {
+      // Сначала пытаемся отключиться через AppKit API
+      const reownDisconnect = (window as any).__reownDisconnect;
+      if (reownDisconnect) {
+        console.log('🔄 Calling AppKit disconnect...');
+        await reownDisconnect();
+        console.log('✅ AppKit disconnect completed');
+      } else {
+        console.log('⚠️ AppKit disconnect function not found');
+      }
+      
+      // Затем очищаем через WalletContext
+      await disconnectReown();
+      
+    } catch (error) {
+      console.error('❌ Error disconnecting Reown:', error);
+      
+      // Даже при ошибке пытаемся очистить состояние
+      try {
+        await disconnectReown();
+      } catch (fallbackError) {
+        console.error('❌ Fallback disconnect also failed:', fallbackError);
+      }
+    }
+  };
 
   const formatAddress = (addr: string) => {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -22,6 +71,9 @@ export const WalletConnection: React.FC = () => {
 
   const getWalletName = () => {
     if (chain === 'bnb') {
+      if (reownAddress) {
+        return 'Reown Wallet';
+      }
       return 'MetaMask';
     } else {
       if (solanaWallet?.wallet?.adapter?.name) {
@@ -31,26 +83,57 @@ export const WalletConnection: React.FC = () => {
     }
   };
 
+  const isMetaMaskInstalled = () => {
+    if (typeof window === 'undefined') return false;
+    
+    // Check for MetaMask provider
+    if (window.ethereum?.providers?.length) {
+      return window.ethereum.providers.some((provider: any) => provider.isMetaMask && !provider.isPhantom);
+    }
+    
+    if (window.ethereum?.isMetaMask && !window.ethereum?.isPhantom) {
+      return true;
+    }
+    
+    if (window.ethereum?._metamask) {
+      return true;
+    }
+    
+    if ((window as any).metamask) {
+      return true;
+    }
+    
+    return false;
+  };
+
   const getChainName = () => {
     return chain === 'bnb' ? 'BNB Smart Chain' : 'Solana';
   };
 
-  if (isConnected && address) {
+  // Определяем активное подключение - теперь все через WalletContext
+  const activeAddress = address;
+  const activeConnection = isConnected;
+
+  if (activeConnection && activeAddress) {
+    const displayName = getWalletName();
+    // Если BNB chain и есть reownAddress - значит это Reown подключение
+    const isReownConnection = chain === 'bnb' && !!reownAddress;
+    
     return (
       <div className="wallet-connected">
         <div className="wallet-info">
           <div className="wallet-status">
             <Wallet size={20} />
-            <span>Connected to {getWalletName()}</span>
+            <span>Connected to {displayName}</span>
           </div>
-          <div className="wallet-address">{formatAddress(address)}</div>
+          <div className="wallet-address">{formatAddress(activeAddress)}</div>
           <div className="wallet-chain">{getChainName()}</div>
         </div>
         
         {chain === 'bnb' ? (
           <button 
             className="disconnect-btn"
-            onClick={disconnect}
+            onClick={isReownConnection ? handleReownDisconnect : disconnect}
             title="Disconnect wallet"
           >
             <LogOut size={18} />
@@ -68,6 +151,8 @@ export const WalletConnection: React.FC = () => {
             }} 
           />
         )}
+
+
       </div>
     );
   }
@@ -79,40 +164,33 @@ export const WalletConnection: React.FC = () => {
         <p>
           Connect your wallet to access {getChainName()} features and view your vesting information.
         </p>
-        {!isConnected && (
+        {!activeConnection && (
           <div className="wallet-note">
             Basic vesting information is available without connecting a wallet.
           </div>
         )}
       </div>
       
-      {error && (
+      {(error || localError) && (
         <div className="error-message">
           <AlertTriangle size={18} />
-          <span>{error}</span>
+          <span>{error || localError}</span>
         </div>
       )}
 
       {chain === 'bnb' ? (
-        <button 
-          className="connect-btn"
-          onClick={connect}
-          disabled={isConnecting}
-        >
-          {isConnecting ? (
-            <>
-              <div className="spinner small" />
-              Connecting...
-            </>
-          ) : (
-            <>
-              <Wallet size={18} />
-              Connect MetaMask
-            </>
-          )}
-        </button>
+        <div className="bnb-wallet-section">
+          {/* Всегда показываем Reown AppKit для BNB */}
+          <div className="reown-section">
+            <ReownAppKitConnect 
+              onConnect={handleReownConnect}
+              onDisconnect={handleReownDisconnect}
+            />
+          </div>
+
+        </div>
       ) : (
-        <div className="solana-wallet-section">
+        <div className="solana-wallet-section" style={{ marginTop: '20px' }}>
           <WalletMultiButton 
             style={{ 
               background: 'linear-gradient(145deg, #00ff88, #00cc6a)',
@@ -143,71 +221,9 @@ export const WalletConnection: React.FC = () => {
         </div>
       )}
       
-      <div className="wallet-requirements">
-        <h4>Requirements:</h4>
-        <ul>
-          <li>
-            {chain === 'bnb' 
-              ? 'MetaMask wallet extension installed'
-              : 'Compatible Solana wallet (Phantom, Solflare, etc.)'
-            }
-          </li>
-          <li>
-            {chain === 'bnb' 
-              ? 'Connect to BSC Testnet (will be added automatically)' 
-              : 'Connect to Solana Devnet'
-            }
-          </li>
-          <li>
-            Small amount of {chain === 'bnb' ? 'BNB' : 'SOL'} for transaction fees
-          </li>
-        </ul>
-        
-        <div className="wallet-download">
-          <h5>Download Wallets:</h5>
-          <div className="download-links">
-            {chain === 'bnb' ? (
-              <a 
-                href="https://metamask.io/download/" 
-                target="_blank"
-                rel="noopener noreferrer"
-                className="download-link"
-              >
-                Download MetaMask →
-              </a>
-            ) : (
-              <>
-                <a 
-                  href="https://phantom.app/download" 
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="download-link"
-                >
-                  Download Phantom →
-                </a>
-                <a 
-                  href="https://solflare.com/download" 
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="download-link"
-                >
-                  Download Solflare →
-                </a>
-              </>
-            )}
-          </div>
-        </div>
 
-        {chain === 'solana' && (
-          <div className="solana-info">
-            <h5>Solana Wallet Support:</h5>
-            <p>
-              Click "Connect Solana Wallet" to see all available wallets. 
-              The modal will show installed browser extensions and mobile wallet options.
-            </p>
-          </div>
-        )}
-      </div>
+
+
     </div>
   );
 };

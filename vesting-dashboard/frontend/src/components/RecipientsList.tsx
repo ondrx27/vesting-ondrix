@@ -34,7 +34,9 @@ export const RecipientsList: React.FC<RecipientsListProps> = ({
       } else {
         const remainderStr = remainder.toString().padStart(decimals, '0');
         const trimmed = remainderStr.replace(/0+$/, '');
-        return `${quotient}.${trimmed}`;
+        // Limit to 3 decimal places
+        const limitedDecimals = trimmed.length > 3 ? trimmed.substring(0, 3) : trimmed;
+        return `${quotient}.${limitedDecimals}`;
       }
     } catch (error) {
       return '0';
@@ -81,7 +83,9 @@ export const RecipientsList: React.FC<RecipientsListProps> = ({
 
       <div className="recipients-list">
         {displayedRecipients.map((recipient, index) => {
-          const allocation = (BigInt(totalAmount) * BigInt(recipient.percentage)) / 100n;
+          // ✅ UPDATED: Handle both basis points and percentage
+          const percentage = recipient.percentage || (recipient.basisPoints ? recipient.basisPoints / 100 : 0);
+          const allocation = (BigInt(totalAmount) * BigInt(Math.floor(percentage * 100))) / 10000n;
           const isCurrentUser = userRole.recipientIndex === index && userRole.isRecipient;
           
           return (
@@ -99,8 +103,14 @@ export const RecipientsList: React.FC<RecipientsListProps> = ({
               <div className="recipient-details">
                 <div className="detail-row">
                   <span className="label">Allocation:</span>
-                  <span className="value">{recipient.percentage}%</span>
+                  <span className="value">{percentage.toFixed(2)}%</span>
                 </div>
+                {recipient.basisPoints && (
+                  <div className="detail-row">
+                    <span className="label">Basis Points:</span>
+                    <span className="value">{recipient.basisPoints}</span>
+                  </div>
+                )}
                 <div className="detail-row">
                   <span className="label">Amount:</span>
                   <span className="value">

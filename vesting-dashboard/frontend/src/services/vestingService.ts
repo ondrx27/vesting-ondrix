@@ -56,8 +56,8 @@ export class VestingService {
     this.config = {
       bnb: {
         rpcUrl: 'https://bsc-testnet.drpc.org',
-        contractAddress: import.meta.env.VITE_BNB_CONTRACT_ADDRESS || '0xEAA6c8F73116f5D08bfb90a93Ee7aAcbd1498E84',
-        tokenAddress: import.meta.env.VITE_BNB_TOKEN_ADDRESS || '0xFBA837650a37138Aa4C559025E28D98698c1f082',
+        contractAddress: import.meta.env.VITE_BNB_CONTRACT_ADDRESS || '0x779272a662e72Fd637A5E1598812D32cE9AC8788',
+        tokenAddress: import.meta.env.VITE_BNB_TOKEN_ADDRESS || '0x1F90b42CaF179CA404025a7C0234d348d3DC6b12',
         name: 'BNB Smart Chain Testnet',
         explorerUrl: 'https://testnet.bscscan.com'
       },
@@ -76,7 +76,9 @@ export class VestingService {
     provider?: ethers.BrowserProvider
   ): Promise<VestingData | null> {
     try {
-      const rpcProvider = provider || new ethers.JsonRpcProvider(this.config.bnb.rpcUrl);
+      // Always use RPC provider for contract calls to avoid MetaMask network issues
+      // MetaMask provider will be used only for signing transactions
+      const rpcProvider = new ethers.JsonRpcProvider(this.config.bnb.rpcUrl);
       const contract = new ethers.Contract(
         this.config.bnb.contractAddress,
         BNB_VESTING_ABI,
@@ -87,7 +89,49 @@ export class VestingService {
 
       console.group('🔧 BNB Vesting - Contract Data Analysis');
       
-      const scheduleResult = await contract.getVestingSchedule(KNOWN_INITIALIZER) as ContractVestingSchedule;
+      // 🔍 Debug network and contract info
+      console.log('🌐 Network info:', {
+        contractAddress: this.config.bnb.contractAddress,
+        beneficiaryAddress: KNOWN_INITIALIZER,
+        userAddress,
+        hasProvider: !!provider,
+        rpcUrl: this.config.bnb.rpcUrl
+      });
+      
+      const network = await rpcProvider.getNetwork();
+      console.log('🌐 RPC network:', {
+        name: network.name,
+        chainId: network.chainId.toString()
+      });
+      
+      console.log('📞 Calling getVestingSchedule...');
+      let scheduleResult: ContractVestingSchedule;
+      try {
+        scheduleResult = await contract.getVestingSchedule(KNOWN_INITIALIZER) as ContractVestingSchedule;
+        console.log('✅ getVestingSchedule result:', scheduleResult);
+      } catch (scheduleError: any) {
+        console.error('❌ getVestingSchedule failed:', scheduleError);
+        console.error('❌ Schedule error details:', {
+          message: scheduleError.message,
+          code: scheduleError.code,
+          data: scheduleError.data
+        });
+        
+        // Try with different approach
+        try {
+          console.log('🔄 Trying alternative contract call...');
+          const code = await rpcProvider.getCode(this.config.bnb.contractAddress);
+          console.log('📋 Contract code exists:', code !== '0x');
+          
+          if (code === '0x') {
+            throw new Error('Contract does not exist at this address');
+          }
+        } catch (codeError) {
+          console.error('❌ Contract code check failed:', codeError);
+        }
+        
+        throw scheduleError;
+      }
       
       if (!scheduleResult.isInitialized) {
         console.log('❌ Contract not initialized');
@@ -116,7 +160,7 @@ export class VestingService {
       console.log('📊 Contract Schedule Data:', {
         totalAmount: totalAmount.toString(),
         claimedAmount: claimedAmount.toString(),
-        startTime: scheduleResult.startTime > 0 ? new Date(Number(scheduleResult.startTime) * 1000).toISOString() : 'Not started'
+        startTime: scheduleResult.startTime > 0n ? new Date(Number(scheduleResult.startTime) * 1000).toISOString() : 'Not started'
       });
 
       try {
@@ -129,28 +173,39 @@ export class VestingService {
           contractClaimedAmount: claimedAmount.toString()
         });
         
-        if (claimableFromContract === 0n && claimedAmount < totalAmount && canDistribute === false) {
-          console.log('🚨 Potential data inconsistency detected - assuming full distribution');
-          claimedAmount = totalAmount; 
-        }
+        // ✅ REMOVED: Incorrect logic that assumed full distribution
+        // if (claimableFromContract === 0n && claimedAmount < totalAmount && canDistribute === false) {
+        //   console.log('🚨 Potential data inconsistency detected - assuming full distribution');
+        //   claimedAmount = totalAmount; 
+        // }
+        
+        // ✅ CORRECT: Trust the contract data as-is
+        console.log('📊 Contract data is trusted as-is:', {
+          claimedAmount: claimedAmount.toString(),
+          claimableFromContract: claimableFromContract.toString(),
+          canDistribute
+        });
       } catch (error) {
         console.warn('Could not perform additional contract checks:', error);
       }
 
       let isFullyVested = claimedAmount >= totalAmount;
       
-      if (!isFullyVested) {
-        const currentTime = Math.floor(Date.now() / 1000);
-        const startTime = Number(scheduleResult.startTime);
-        const elapsedTime = currentTime - startTime;
-        const vestingEndTime = startTime + Number(scheduleResult.vestingDuration);
-        
-        if (currentTime >= vestingEndTime && elapsedTime > 1200) {
-          console.log('🕒 Vesting period completed by time, assuming full distribution');
-          isFullyVested = true;
-          claimedAmount = totalAmount; 
-        }
-      }
+      // ✅ REMOVED: Incorrect time-based logic that assumed full distribution
+      // The contract should be the source of truth, not time calculations
+      
+      // if (!isFullyVested) {
+      //   const currentTime = Math.floor(Date.now() / 1000);
+      //   const startTime = Number(scheduleResult.startTime);
+      //   const elapsedTime = currentTime - startTime;
+      //   const vestingEndTime = startTime + Number(scheduleResult.vestingDuration);
+      //   
+      //   if (currentTime >= vestingEndTime && elapsedTime > 1200) {
+      //     console.log('🕒 Vesting period completed by time, assuming full distribution');
+      //     isFullyVested = true;
+      //     claimedAmount = totalAmount; 
+      //   }
+      // }
 
       console.log('📊 Final status check:', {
         isFullyVested,
@@ -164,38 +219,69 @@ export class VestingService {
       let remainingAmount: bigint;
       let currentPeriod: number;
 
-      if (isFullyVested) {
-        unlockedPercentage = 100;
-        unlockedAmount = totalAmount;
-        claimableAmount = 0n;  
-        remainingAmount = 0n;  
-        currentPeriod = 4;  
+      // ✅ FIXED: Use contract's getVestingProgress for real-time linear vesting calculation
+      try {
+        console.log('🔄 Getting real-time vesting progress from contract...');
+        const progressResult = await contract.getVestingProgress(KNOWN_INITIALIZER);
         
-        console.log('✅ Vesting completed - all tokens distributed');
-      } else {
-        const currentTime = Math.floor(Date.now() / 1000);
-        const startTime = Number(scheduleResult.startTime);
-        const actualElapsed = Math.max(0, currentTime - startTime);
+        unlockedPercentage = Number(progressResult.unlockedPercentage);
+        unlockedAmount = BigInt(progressResult.unlockedAmount);
+        claimableAmount = BigInt(progressResult.claimableAmount);
+        remainingAmount = BigInt(progressResult.remainingAmount);
         
-        unlockedPercentage = this.calculateUnlockedPercentageManually(actualElapsed);
-        currentPeriod = this.calculateBNBCurrentPeriod(actualElapsed);
-        
-        unlockedAmount = (totalAmount * BigInt(unlockedPercentage)) / 100n;
-        claimableAmount = unlockedAmount - claimedAmount;
-        remainingAmount = totalAmount - unlockedAmount;
-        
-        console.log('📊 Active vesting calculation:', {
-          elapsedTime: actualElapsed,
-          elapsedMinutes: Math.floor(actualElapsed / 60),
+        console.log('✅ Real-time progress from contract:', {
           unlockedPercentage,
-          currentPeriod,
           unlockedAmount: unlockedAmount.toString(),
           claimableAmount: claimableAmount.toString(),
           remainingAmount: remainingAmount.toString()
         });
+
+      } catch (progressError) {
+        console.warn('⚠️ Contract progress call failed, using fallback calculation:', progressError);
+        
+        // Fallback to manual calculation
+        const currentTime = Math.floor(Date.now() / 1000);
+        const startTime = Number(scheduleResult.startTime);
+        const actualElapsed = Math.max(0, currentTime - startTime);
+        
+        unlockedPercentage = this.calculateLinearUnlockPercentage(actualElapsed, scheduleResult);
+        currentPeriod = this.calculateBNBCurrentPeriod(actualElapsed);
+        
+        const unlockedBasisPoints = Math.floor(unlockedPercentage * 100);
+        unlockedAmount = (totalAmount * BigInt(unlockedBasisPoints)) / 10000n;
+        claimableAmount = unlockedAmount - claimedAmount;
+        remainingAmount = totalAmount - unlockedAmount;
       }
 
+      currentPeriod = this.calculateBNBCurrentPeriod(
+        Math.max(0, Math.floor(Date.now() / 1000) - Number(scheduleResult.startTime))
+      );
+      
+      // Fix negative claimable amount
+      if (claimableAmount < 0n) {
+        claimableAmount = 0n;
+      }
+      
+      const currentTime = Math.floor(Date.now() / 1000);
+      const startTime = Number(scheduleResult.startTime);
+      const actualElapsed = Math.max(0, currentTime - startTime);
+      
+      console.log('📊 Time-based vesting calculation:', {
+        currentTime,
+        startTime,
+        elapsedTime: actualElapsed,
+        elapsedMinutes: Math.floor(actualElapsed / 60),
+        unlockedPercentage,
+        currentPeriod,
+        totalAmount: totalAmount.toString(),
+        claimedAmount: claimedAmount.toString(),
+        unlockedAmount: unlockedAmount.toString(),
+        claimableAmount: claimableAmount.toString(),
+        remainingAmount: remainingAmount.toString()
+      });
+
       const schedule: VestingSchedule = {
+        chain: 'bnb',  // ✅ ADD: Specify this is BNB chain
         isInitialized: scheduleResult.isInitialized,
         token: scheduleResult.token,
         startTime: Number(scheduleResult.startTime),
@@ -208,7 +294,7 @@ export class VestingService {
       };
 
       const progress: VestingProgress = {
-        elapsedTime: isFullyVested ? Number(scheduleResult.vestingDuration) : Math.max(0, Math.floor(Date.now() / 1000) - Number(scheduleResult.startTime)),
+        elapsedTime: actualElapsed,
         unlockedPercentage,
         unlockedAmount: unlockedAmount.toString(),
         claimableAmount: claimableAmount.toString(),
@@ -235,18 +321,60 @@ export class VestingService {
       const recipientsResult = await contract.getRecipients(KNOWN_INITIALIZER) as ContractRecipient[];
       const uniqueRecipients = new Map<string, Recipient>();
       
-      recipientsResult.forEach((r: ContractRecipient) => {
-        const wallet = r.wallet.toLowerCase();
-        if (wallet !== '0x0000000000000000000000000000000000000000' && r.percentage > 0) {
+      console.log('🎯 Raw recipients data from contract:', recipientsResult);
+      
+      recipientsResult.forEach((r: any, index: number) => {
+        console.log(`📋 Processing recipient ${index}:`, {
+          wallet: r.wallet,
+          basisPoints: r.basisPoints?.toString(),
+          claimedAmount: r.claimedAmount?.toString(),
+          lastClaimTime: r.lastClaimTime?.toString()
+        });
+        
+        const wallet = r.wallet?.toLowerCase();
+        if (wallet && wallet !== '0x0000000000000000000000000000000000000000' && Number(r.basisPoints) > 0) {
+          const percentage = Number(r.basisPoints) / 100; // Convert basis points to percentage
           uniqueRecipients.set(wallet, {
             wallet: r.wallet,
-            percentage: Number(r.percentage)
+            basisPoints: Number(r.basisPoints),
+            percentage: Number(r.basisPoints) / 100,
+            claimedAmount: r.claimedAmount ? r.claimedAmount.toString() : '0',
+            lastClaimTime: r.lastClaimTime ? Number(r.lastClaimTime) : 0
           });
         }
       });
       
       const recipients: Recipient[] = Array.from(uniqueRecipients.values());
+      
+      console.log('🎯 Final processed recipients:', recipients);
+      console.log('👤 User role determination:', {
+        userAddress,
+        recipientsCount: recipients.length,
+        recipientWallets: recipients.map(r => r.wallet.toLowerCase())
+      });
+      
       const userRole = this.determineUserRole(userAddress, KNOWN_INITIALIZER, recipients);
+      
+      // ✅ NEW: Calculate recipient-specific progress if user is a recipient
+      if (userRole.isRecipient && userRole.recipientData) {
+        const personalTotalAmount = (BigInt(schedule.totalAmount) * BigInt(userRole.recipientData.basisPoints)) / 10000n;
+        const personalClaimedAmount = BigInt(userRole.recipientData.claimedAmount || 0);
+        const personalUnlockedAmount = (unlockedAmount * BigInt(userRole.recipientData.basisPoints)) / 10000n;
+        const personalClaimableAmount = personalUnlockedAmount - personalClaimedAmount;
+        
+        console.log('👤 Personal recipient calculation:', {
+          basisPoints: userRole.recipientData.basisPoints,
+          personalTotalAmount: personalTotalAmount.toString(),
+          personalClaimedAmount: personalClaimedAmount.toString(),
+          personalUnlockedAmount: personalUnlockedAmount.toString(),
+          personalClaimableAmount: personalClaimableAmount.toString()
+        });
+        
+        // Override progress for recipient
+        progress.claimableAmount = personalClaimableAmount.toString();
+        progress.canClaimNow = personalClaimableAmount > 0n;
+      }
+      
       const claimStatus = await this.calculateClaimStatus(contract, KNOWN_INITIALIZER, schedule, progress, userRole);
 
       return {
@@ -315,6 +443,7 @@ export class VestingService {
 
       return {
         schedule: {
+          chain: 'solana',  // ✅ ADD: Specify this is Solana chain
           isInitialized: parsedData.isInitialized,
           token: parsedData.mint,
           startTime: parsedData.startTime,
@@ -323,7 +452,10 @@ export class VestingService {
           totalAmount: parsedData.totalAmount,
           claimedAmount: this.calculateTotalClaimed(parsedData.recipients),
           recipientCount: parsedData.recipientCount,
-          isRevoked: parsedData.isRevoked
+          tgeBasisPoints: parsedData.tgeBasisPoints,  // ✅ UPDATED: Add basis points
+          tgePercentage: parsedData.tgePercentage,    // ✅ LEGACY: Keep for compatibility
+          isFinalized: parsedData.isFinalized,        // ✅ UPDATED: New field
+          lastDistributionTime: parsedData.lastDistributionTime  // ✅ UPDATED: New field
         },
         progress,
         recipients: parsedData.recipients,
@@ -342,8 +474,9 @@ export class VestingService {
     try {
       console.log('📊 Parsing Solana account with length:', data.length);
       
-      if (!data || data.length < 141) {
-        console.error(`Invalid vesting account data. Length: ${data?.length || 0}, expected at least 141`);
+      // ✅ UPDATED: Expected size with basis points and new fields
+      if (!data || data.length < 640) {
+        console.error(`Invalid vesting account data. Length: ${data?.length || 0}, expected at least 640`);
         return null;
       }
       
@@ -373,15 +506,14 @@ export class VestingService {
       const vestingPeriod = Number(data.readBigInt64LE(offset));
       offset += 8;
 
-      const tgePercentage = data[offset];
-      offset += 1;
+      // ✅ UPDATED: TGE basis points (u16 instead of u8)
+      const tgeBasisPoints = data.readUInt16LE(offset);
+      offset += 2;
 
       const recipientCount = data[offset];
       offset += 1;
 
-      const isRevoked = data[offset] === 1;
-      offset += 1;
-
+      // ✅ UPDATED: New fields from contract
       const isFinalized = data[offset] === 1;
       offset += 1;
 
@@ -394,7 +526,8 @@ export class VestingService {
         startTime: startTime > 0 ? new Date(startTime * 1000).toISOString() : 'Not started',
         totalAmount: totalAmount.toString(),
         recipientCount,
-        isRevoked,
+        tgeBasisPoints,
+        tgePercentage: tgeBasisPoints / 100,  // Show as percentage for logging
         isFinalized,
         lastDistributionTime
       });
@@ -404,7 +537,8 @@ export class VestingService {
       console.log('👥 Parsing recipients starting at offset:', offset);
       
       for (let i = 0; i < Math.min(recipientCount, 10); i++) {
-        if (offset + 49 > data.length) {
+        // ✅ UPDATED: Each recipient now 50 bytes (32 + 2 + 8 + 8)
+        if (offset + 50 > data.length) {
           console.warn(`Not enough data for recipient ${i}, stopping parsing`);
           break;
         }
@@ -412,8 +546,9 @@ export class VestingService {
         const wallet = new PublicKey(data.slice(offset, offset + 32));
         offset += 32;
 
-        const percentage = data[offset];
-        offset += 1;
+        // ✅ UPDATED: Basis points (u16) instead of percentage (u8)
+        const basisPoints = data.readUInt16LE(offset);
+        offset += 2;
 
         const claimedAmount = data.readBigUInt64LE(offset);
         offset += 8;
@@ -421,10 +556,11 @@ export class VestingService {
         const lastClaimTime = Number(data.readBigInt64LE(offset));
         offset += 8;
 
-        if (percentage > 0) {
+        if (basisPoints > 0) {
           const recipient: Recipient = {
             wallet: wallet.toBase58(),
-            percentage: percentage,
+            basisPoints: basisPoints,  // ✅ UPDATED: Store basis points
+            percentage: basisPoints / 100,  // ✅ UPDATED: Calculate percentage for display
             claimedAmount: claimedAmount.toString(),
             lastClaimTime: lastClaimTime
           };
@@ -433,6 +569,7 @@ export class VestingService {
           
           console.log(`👤 Recipient ${i}:`, {
             wallet: recipient.wallet.substring(0, 8) + '...',
+            basisPoints: recipient.basisPoints,
             percentage: recipient.percentage,
             claimedAmount: recipient.claimedAmount,
             lastClaimTime: lastClaimTime > 0 ? new Date(lastClaimTime * 1000).toISOString() : 'Never'
@@ -451,10 +588,10 @@ export class VestingService {
         totalAmount: totalAmount.toString(),
         cliffPeriod,
         vestingPeriod,
-        tgePercentage,
+        tgeBasisPoints,  // ✅ UPDATED: Use basis points
+        tgePercentage: tgeBasisPoints / 100,  // ✅ LEGACY: For backwards compatibility
         recipients,
         recipientCount,
-        isRevoked,
         isFinalized,
         lastDistributionTime
       };
@@ -481,6 +618,21 @@ export class VestingService {
     }
   }
 
+  private calculateLinearUnlockPercentage(elapsedTime: number, schedule: any): number {
+    if (elapsedTime < Number(schedule.cliffDuration)) {
+      return 0;
+    }
+    
+    if (elapsedTime >= Number(schedule.vestingDuration)) {
+      return 100;
+    }
+    
+    const vestingElapsed = elapsedTime - Number(schedule.cliffDuration);
+    const remainingVesting = Number(schedule.vestingDuration) - Number(schedule.cliffDuration);
+    
+    return Math.min(100, (vestingElapsed / remainingVesting) * 100);
+  }
+
   private calculateBNBCurrentPeriod(elapsedTime: number): number {
     if (elapsedTime < 0) return 0;
     
@@ -505,23 +657,62 @@ export class VestingService {
     let currentPeriod = 0;
 
     if (vestingData.startTime > 0) {
-      if (elapsedTime < 300) {        
-        unlockedPercentage = 10;
-        currentPeriod = 1;
-      } else if (elapsedTime < 600) { 
-        unlockedPercentage = 20;
-        currentPeriod = 2;
-      } else if (elapsedTime < 900) { 
-        unlockedPercentage = 50;
-        currentPeriod = 3;
-      } else {                        
+      // ✅ FIXED: Real-time linear vesting calculation for Solana (TGE + continuous linear unlock)
+      const cliffPeriod = vestingData.cliffPeriod || 7776000;  // 3 months default (90 days * 24h * 60m * 60s)
+      const vestingPeriod = vestingData.vestingPeriod || 23328000;  // 9 months default (270 days * 24h * 60m * 60s)
+      const tgeBasisPoints = vestingData.tgeBasisPoints || 1500;  // 15% default
+      const tgePercentage = tgeBasisPoints / 100;
+      
+      console.log('🔄 Solana real-time vesting calculation:', {
+        currentTime,
+        startTime: vestingData.startTime,
+        elapsedTime,
+        elapsedMinutes: Math.floor(elapsedTime / 60),
+        cliffPeriod,
+        vestingPeriod,
+        tgePercentage
+      });
+      
+      if (elapsedTime < cliffPeriod) {
+        // Before cliff: only TGE is available immediately at start
+        unlockedPercentage = elapsedTime > 0 ? tgePercentage : 0;
+        currentPeriod = elapsedTime > 0 ? 1 : 0;
+      } else if (elapsedTime >= vestingPeriod) {
+        // After full vesting: 100% is available
         unlockedPercentage = 100;
         currentPeriod = 4;
+      } else {
+        // ✅ FIXED: Real-time linear vesting between cliff and end
+        const vestingElapsed = elapsedTime - cliffPeriod;
+        const vestingDuration = vestingPeriod - cliffPeriod;
+        const linearProgress = vestingElapsed / vestingDuration;  // 0 to 1
+        const linearVestingPercent = (100 - tgePercentage) * linearProgress;
+        
+        unlockedPercentage = tgePercentage + linearVestingPercent;
+        
+        // More granular period tracking
+        const progressRatio = vestingElapsed / vestingDuration;
+        if (progressRatio < 0.33) {
+          currentPeriod = 2;  // Early linear vesting
+        } else if (progressRatio < 0.66) {
+          currentPeriod = 3;  // Mid linear vesting
+        } else {
+          currentPeriod = 4;  // Late linear vesting
+        }
       }
+
+      console.log('✅ Solana calculated progress:', {
+        unlockedPercentage,
+        currentPeriod,
+        tgePercentage,
+        isInLinearVesting: elapsedTime >= cliffPeriod && elapsedTime < vestingPeriod
+      });
     }
 
     const totalAmount = BigInt(vestingData.totalAmount);
-    const unlockedAmount = (totalAmount * BigInt(unlockedPercentage)) / 100n;
+    // ✅ FIX: Convert percentage to basis points to avoid decimal BigInt conversion
+    const unlockedBasisPoints = Math.floor(unlockedPercentage * 100);
+    const unlockedAmount = (totalAmount * BigInt(unlockedBasisPoints)) / 10000n;
     
     const totalClaimed = vestingData.recipients.reduce((sum: bigint, recipient: Recipient) => {
       return sum + BigInt(recipient.claimedAmount || '0');
@@ -740,12 +931,15 @@ export class VestingService {
   }
 
   private calculateSolanaClaimStatus(vestingData: any, progress: VestingProgress, userRole: UserRole): ClaimStatus {
-    if (vestingData.isRevoked) {
-      return {
-        canClaim: false,
-        reason: 'Vesting has been revoked'
-      };
-    }
+    // ✅ REMOVED: isRevoked check since field was deleted from contract for immutability
+    // Vesting can never be revoked now
+    
+    // if (vestingData.isRevoked) {
+    //   return {
+    //     canClaim: false,
+    //     reason: 'Vesting has been revoked'
+    //   };
+    // }
 
     if (vestingData.startTime === 0) {
       return {
@@ -809,7 +1003,9 @@ export class VestingService {
       } else {
         const remainderStr = remainder.toString().padStart(decimals, '0');
         const trimmed = remainderStr.replace(/0+$/, '');
-        return `${quotient}.${trimmed}`;
+        // Limit to 3 decimal places
+        const limitedDecimals = trimmed.length > 3 ? trimmed.substring(0, 3) : trimmed;
+        return `${quotient}.${limitedDecimals}`;
       }
     } catch (error) {
       return '0';
@@ -827,6 +1023,162 @@ export class VestingService {
     if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''}`;
     if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''}`;
     return `${seconds} second${seconds > 1 ? 's' : ''}`;
+  }
+
+  async directClaimTokens(
+    beneficiaryAddress: string,
+    provider: ethers.BrowserProvider
+  ): Promise<ClaimResponse> {
+    try {
+      console.log('🚀 Starting direct claim process', { beneficiaryAddress });
+      
+      // Try to get signer with retry for pending permission requests
+      const signer = await this.getSignerWithRetry(provider);
+      const contract = new ethers.Contract(
+        this.config.bnb.contractAddress,
+        BNB_VESTING_ABI,
+        signer
+      );
+
+      console.log('📋 Calling claimTokens on contract...');
+      const tx = await contract.claimTokens(beneficiaryAddress);
+      console.log('✅ Transaction sent:', tx.hash);
+
+      console.log('⏳ Waiting for transaction confirmation...');
+      const receipt = await tx.wait();
+      console.log('✅ Transaction confirmed:', receipt);
+
+      const claimedAmount = this.extractClaimedAmountFromReceipt(receipt);
+      
+      return {
+        success: true,
+        transactionHash: tx.hash,
+        amount: claimedAmount
+      };
+
+    } catch (error: any) {
+      console.error('❌ Direct claim failed:', error);
+      
+      let errorMessage = 'Failed to claim tokens';
+      
+      if (error.code === 'ACTION_REJECTED') {
+        errorMessage = 'Transaction rejected by user';
+      } else if (error.code === 'INSUFFICIENT_FUNDS') {
+        errorMessage = 'Insufficient BNB for transaction fees';
+      } else if (error.code === -32002) {
+        errorMessage = 'Wallet has pending requests. Please check your wallet and try again.';
+      } else if (error.reason) {
+        errorMessage = error.reason;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      return {
+        success: false,
+        error: errorMessage
+      };
+    }
+  }
+
+  private async getSignerWithRetry(provider: ethers.BrowserProvider, maxRetries: number = 3): Promise<ethers.Signer> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 Attempting to get signer (attempt ${attempt}/${maxRetries})`);
+        
+        // Wait a bit between retries
+        if (attempt > 1) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+        
+        // Try different methods to get signer
+        let signer: ethers.Signer;
+        
+        if (attempt === 1) {
+          // First attempt: standard getSigner()
+          signer = await provider.getSigner();
+        } else if (attempt === 2) {
+          // Second attempt: try to get signer by index
+          console.log('🔄 Trying getSigner(0)...');
+          signer = await provider.getSigner(0);
+        } else {
+          // Third attempt: try to get accounts first, then signer
+          console.log('🔄 Trying listAccounts first...');
+          const accounts = await provider.listAccounts();
+          if (accounts.length === 0) {
+            throw new Error('No accounts available');
+          }
+          console.log('✅ Found accounts, getting signer...');
+          signer = await provider.getSigner(accounts[0].address);
+        }
+        
+        console.log('✅ Successfully got signer');
+        return signer;
+        
+      } catch (error: any) {
+        console.warn(`⚠️ Attempt ${attempt} failed:`, error.code || error.message);
+        
+        if (error.code === -32002 && attempt < maxRetries) {
+          console.log('⏳ Pending request detected, waiting longer before retry...');
+          continue;
+        }
+        
+        if (attempt === maxRetries) {
+          // Last attempt failed - provide helpful error message
+          if (error.code === -32002) {
+            throw new Error('MetaMask has pending requests. Please check your wallet, approve or reject any pending requests, and try again.');
+          }
+          throw error;
+        }
+      }
+    }
+    
+    throw new Error('Failed to get signer after retries');
+  }
+
+  private extractClaimedAmountFromReceipt(receipt: any): string {
+    try {
+      console.log('📋 Extracting claimed amount from receipt...', {
+        logsCount: receipt.logs?.length || 0
+      });
+
+      if (receipt.logs && receipt.logs.length > 0) {
+        for (const log of receipt.logs) {
+          try {
+            const parsedLog = new ethers.Interface(BNB_VESTING_ABI).parseLog(log);
+            console.log('📄 Parsed log:', { name: parsedLog?.name, args: parsedLog?.args });
+            
+            if (parsedLog && (parsedLog.name === 'TokensClaimed' || parsedLog.name === 'TokensDistributed')) {
+              const amount = parsedLog.args.amount?.toString() || '0';
+              console.log('✅ Found claim amount:', amount);
+              return amount;
+            }
+          } catch (parseError) {
+            console.log('⚠️ Could not parse log:', parseError);
+            continue;
+          }
+        }
+      }
+
+      // Try to find ERC20 Transfer events as fallback
+      for (const log of receipt.logs) {
+        try {
+          // Standard ERC20 Transfer event: Transfer(address from, address to, uint256 value)
+          if (log.topics[0] === '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef') {
+            const transferAmount = BigInt(log.data).toString();
+            console.log('✅ Found Transfer event amount:', transferAmount);
+            return transferAmount;
+          }
+        } catch (parseError) {
+          continue;
+        }
+      }
+
+      console.log('⚠️ No TokensClaimed, TokensDistributed, or Transfer event found, returning 0');
+      return '0';
+    } catch (error) {
+      console.warn('❌ Could not extract claimed amount from receipt:', error);
+      return '0';
+    }
   }
 
   getExplorerUrl(chain: 'bnb' | 'solana', hash: string): string {

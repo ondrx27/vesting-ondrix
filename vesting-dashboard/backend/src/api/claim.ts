@@ -3,6 +3,8 @@ import rateLimit from 'express-rate-limit';
 import { ClaimRequest, ClaimResponse } from '../types';
 import { validateClaimRequest } from '../utils/validation';
 import { logger } from '../utils/logger';
+import { InputSanitizer } from '../utils/sanitization';
+import { ErrorHandler } from '../utils/errorHandler';
 import { BNBService } from '../services/bnb';
 import { SolanaService } from '../services/solana';
 
@@ -41,16 +43,19 @@ function getClientIP(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];
   const realIp = req.headers['x-real-ip'];
   
+  let rawIP = 'unknown';
+  
   if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0];
-  }
-  if (typeof realIp === 'string') {
-    return realIp;
+    rawIP = forwarded.split(',')[0];
+  } else if (typeof realIp === 'string') {
+    rawIP = realIp;
+  } else {
+    rawIP = req.connection?.remoteAddress || 
+            req.socket?.remoteAddress || 
+            'unknown';
   }
   
-  return req.connection.remoteAddress || 
-         req.socket.remoteAddress || 
-         'unknown';
+  return InputSanitizer.sanitizeIP(rawIP);
 }
 
 claimRouter.post('/', async (req: Request, res: Response) => {
@@ -60,12 +65,12 @@ claimRouter.post('/', async (req: Request, res: Response) => {
   try {
     const claimRequest: ClaimRequest = req.body;
     
-    logger.info('Claim request received', {
+    logger.info('Claim request received', InputSanitizer.sanitizeLogData({
       beneficiaryAddress: claimRequest.beneficiaryAddress,
       chain: claimRequest.chain,
       userAddress: claimRequest.userAddress,
       clientIP
-    });
+    }));
 
     const validationErrors = validateClaimRequest(claimRequest);
     if (validationErrors.length > 0) {
@@ -102,12 +107,12 @@ claimRouter.post('/', async (req: Request, res: Response) => {
       );
 
       if (!permission.allowed) {
-        logger.warn('Unauthorized claim attempt', {
+        logger.warn('Unauthorized claim attempt', InputSanitizer.sanitizeLogData({
           userAddress,
           beneficiaryAddress: claimRequest.beneficiaryAddress,
           role: permission.role,
           clientIP
-        });
+        }));
 
         return res.status(403).json({
           success: false,
@@ -138,12 +143,12 @@ claimRouter.post('/', async (req: Request, res: Response) => {
       );
 
       if (!permission.allowed) {
-        logger.warn('Unauthorized Solana claim attempt', {
+        logger.warn('Unauthorized Solana claim attempt', InputSanitizer.sanitizeLogData({
           userAddress,
           vestingPDA,
           role: permission.role,
           clientIP
-        });
+        }));
 
         return res.status(403).json({
           success: false,
@@ -177,7 +182,7 @@ claimRouter.post('/', async (req: Request, res: Response) => {
     const executionTime = Date.now() - startTime;
     
     if (claimResult.success) {
-      logger.info('Claim completed successfully', {
+      logger.info('Claim completed successfully', InputSanitizer.sanitizeLogData({
         chain: claimRequest.chain,
         userAddress,
         beneficiaryAddress: claimRequest.beneficiaryAddress,
@@ -185,16 +190,16 @@ claimRouter.post('/', async (req: Request, res: Response) => {
         distributedAmount: claimResult.distributedAmount,
         executionTime: `${executionTime}ms`,
         clientIP
-      });
+      }));
     } else {
-      logger.warn('Claim failed', {
+      logger.warn('Claim failed', InputSanitizer.sanitizeLogData({
         chain: claimRequest.chain,
         userAddress,
         beneficiaryAddress: claimRequest.beneficiaryAddress,
         error: claimResult.error,
         executionTime: `${executionTime}ms`,
         clientIP
-      });
+      }));
     }
 
     res.json(claimResult);
@@ -202,27 +207,31 @@ claimRouter.post('/', async (req: Request, res: Response) => {
   } catch (error: any) {
     const executionTime = Date.now() - startTime;
     
-    logger.error('Claim endpoint error', {
-      error: error.message,
-      stack: error.stack,
-      executionTime: `${executionTime}ms`,
-      clientIP,
-      body: req.body
-    });
+    const safeError = ErrorHandler.logAndGetSafeError(
+      error,
+      'Claim endpoint',
+      {
+        executionTime: `${executionTime}ms`,
+        clientIP,
+        body: req.body
+      },
+      'Internal server error during claim processing'
+    );
 
-    res.status(500).json({
+    res.status(safeError.statusCode || 500).json({
       success: false,
-      error: 'Internal server error during claim processing',
-      timestamp: new Date().toISOString()
+      error: safeError.message,
+      timestamp: safeError.timestamp
     });
   }
 });
 
 claimRouter.get('/status/:chain/:beneficiary', async (req: Request, res: Response) => {
   try {
-    const { chain, beneficiary } = req.params;
-    const userAddress = req.query.user as string;
+    let { chain, beneficiary } = req.params;
+    let userAddress = req.query.user as string;
 
+    // Sanitize route parameters
     if (!chain || !beneficiary) {
       return res.status(400).json({
         success: false,
@@ -230,10 +239,17 @@ claimRouter.get('/status/:chain/:beneficiary', async (req: Request, res: Respons
       });
     }
 
-    if (!['bnb', 'solana'].includes(chain)) {
+    try {
+      chain = InputSanitizer.sanitizeChain(chain);
+      beneficiary = InputSanitizer.sanitizeAddress(beneficiary);
+      
+      if (userAddress) {
+        userAddress = InputSanitizer.sanitizeAddress(userAddress);
+      }
+    } catch (sanitizeError: any) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid chain parameter'
+        error: `Invalid parameter: ${sanitizeError.message}`
       });
     }
 
@@ -252,9 +268,17 @@ claimRouter.get('/status/:chain/:beneficiary', async (req: Request, res: Respons
       permission = await bnbService.verifyUserPermission(userAddress, beneficiary);
       
       if (permission.allowed) {
-        const vestingInfo = await bnbService.getVestingInfo(beneficiary);
-        claimableAmount = vestingInfo.claimableAmount.toString();
-        canClaim = vestingInfo.claimableAmount > 0n;
+        if (permission.role === 'initializer') {
+          // For initializers, get overall claimable amount
+          const vestingInfo = await bnbService.getVestingInfo(beneficiary);
+          claimableAmount = vestingInfo.claimableAmount.toString();
+          canClaim = vestingInfo.claimableAmount > 0n;
+        } else if (permission.role === 'recipient') {
+          // For recipients, get their individual claimable amount
+          const recipientInfo = await bnbService.getRecipientClaimInfo(beneficiary, userAddress);
+          claimableAmount = recipientInfo.claimableAmount.toString();
+          canClaim = recipientInfo.canClaim && recipientInfo.claimableAmount > 0n;
+        }
       }
     } else if (chain === 'solana' && solanaService) {
       const vestingPDA = process.env.SOLANA_VESTING_PDA || beneficiary;
@@ -274,10 +298,21 @@ claimRouter.get('/status/:chain/:beneficiary', async (req: Request, res: Respons
     });
 
   } catch (error: any) {
-    logger.error('Status check error', error);
-    res.status(500).json({
+    const safeError = ErrorHandler.logAndGetSafeError(
+      error,
+      'Claim status check',
+      { 
+        chain: chain || 'unknown', 
+        beneficiary: beneficiary || 'unknown', 
+        userAddress: userAddress || 'unknown' 
+      },
+      'Failed to check claim status'
+    );
+
+    res.status(safeError.statusCode || 500).json({
       success: false,
-      error: 'Failed to check claim status'
+      error: safeError.message,
+      timestamp: safeError.timestamp
     });
   }
 });
@@ -304,11 +339,17 @@ claimRouter.get('/health', async (_req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    logger.error('Claim health check error', error);
+    const safeError = ErrorHandler.logAndGetSafeError(
+      error,
+      'Claim health check',
+      {},
+      'Health check failed'
+    );
+
     res.status(503).json({
       healthy: false,
-      error: 'Health check failed',
-      timestamp: new Date().toISOString()
+      error: safeError.message,
+      timestamp: safeError.timestamp
     });
   }
 });

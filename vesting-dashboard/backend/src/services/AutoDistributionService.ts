@@ -6,7 +6,12 @@ dotenv.config();
 
 import { EventEmitter } from 'events';
 import { Connection, PublicKey, Keypair, Transaction, TransactionInstruction, sendAndConfirmTransaction, SYSVAR_CLOCK_PUBKEY, ComputeBudgetProgram } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, getAccount } from '@solana/spl-token';
+import { 
+  TOKEN_PROGRAM_ID, 
+  getAssociatedTokenAddress, 
+  createAssociatedTokenAccountInstruction,
+  getAccount
+} from '@solana/spl-token';
 import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
@@ -17,7 +22,11 @@ interface VestingContract {
   address: string;
   beneficiaryAddress: string;
   startTime: number;
-  recipients: Array<{ wallet: string; percentage: number }>;
+  recipients: Array<{ 
+    wallet: string; 
+    percentage: number;
+    basisPoints?: number;  // ✅ UPDATED: Add basis points support
+  }>;
   lastDistributionTime: number;
   isActive: boolean;
   // Новые поля для отслеживания распределений
@@ -52,7 +61,7 @@ interface ContractBalance {
 
 class AutoDistributionService extends EventEmitter {
   private isRunning = false;
-  private checkInterval = 30000; // 30 секунд
+  private checkInterval = 300000; // 5 минут (300 секунд)
   private intervalId: NodeJS.Timeout | null = null;
   private vestingContracts: Map<string, VestingContract> = new Map();
 
@@ -226,12 +235,12 @@ class AutoDistributionService extends EventEmitter {
     }
   }
 
-  // Получение баланса BNB контракта (ОБНОВЛЕНО под новый контракт SecureTokenVesting)
+  // Получение баланса BNB контракта (ОБНОВЛЕНО под новый контракт ProductionTokenVesting)
   private async getBNBContractBalance(contract: VestingContract): Promise<ContractBalance> {
     try {
       const provider = new ethers.JsonRpcProvider(this.config.bnb.rpcUrl);
       const vestingABI = [
-        'function getVestingSchedule(address beneficiary) external view returns (bool isInitialized, address token, uint256 startTime, uint256 cliffDuration, uint256 vestingDuration, uint256 totalAmount, uint256 claimedAmount, uint8 recipientCount)',
+        'function getVestingSchedule(address beneficiary) external view returns (bool isInitialized, address token, address authorizedFunder, uint256 startTime, uint256 cliffDuration, uint256 vestingDuration, uint256 totalAmount, uint256 claimedAmount, uint8 recipientCount)',
         'function getClaimableAmount(address beneficiary) external view returns (uint256)',
         'function canDistribute(address beneficiary) external view returns (bool)'
       ];
@@ -248,6 +257,11 @@ class AutoDistributionService extends EventEmitter {
       }
 
       const claimableAmount = await vestingContract.getClaimableAmount(contract.beneficiaryAddress);
+      const canDistribute = await vestingContract.canDistribute(contract.beneficiaryAddress);
+      
+      console.log(`🔍 BNB Contract debug info:`);
+      console.log(`   - getClaimableAmount(): ${claimableAmount.toString()}`);
+      console.log(`   - canDistribute(): ${canDistribute}`);
       
       const balance: ContractBalance = {
         total: schedule.totalAmount.toString(),
@@ -266,8 +280,11 @@ class AutoDistributionService extends EventEmitter {
     }
   }
 
-  // Проверка нужно ли распределять токены
+  // ✅ ИСПРАВЛЕНО: Проверка нужно ли распределять токены на основе реального состояния контракта
   private async shouldDistribute(contract: VestingContract, currentTime: number): Promise<{should: boolean, period?: number}> {
+    // ✅ RESTORED: Автодистрибуция BNB включена обратно
+    // Removed temporary disable - BNB auto-distribution is now active
+
     if (!contract.recipients.length || !contract.startTime) {
       console.log(`   - Contract not ready: recipients=${contract.recipients.length}, startTime=${contract.startTime}`);
       return { should: false };
@@ -290,6 +307,12 @@ class AutoDistributionService extends EventEmitter {
     console.log(`   - Available: ${balance.available}`);
     console.log(`   - Claimable now: ${balance.claimableNow}`);
 
+    // ✅ ГЛАВНАЯ ПРОВЕРКА: если есть claimable токены - значит можно распределять
+    if (BigInt(balance.claimableNow) <= 0n) {
+      console.log(`   - No tokens available for distribution (claimableNow: ${balance.claimableNow})`);
+      return { should: false };
+    }
+
     // Периоды разблокировки (в секундах)
     const unlockPeriods = [
       { time: 300, percentage: 10 },   // 5 минут
@@ -298,38 +321,26 @@ class AutoDistributionService extends EventEmitter {
       { time: 1200, percentage: 100 }  // 20 минут
     ];
 
-    // Проверяем каждый период
+    // ✅ ИСПРАВЛЕНО: Определяем текущий период на основе времени, а не внутреннего состояния
+    let currentPeriod = 0;
     for (const period of unlockPeriods) {
-      const unlockTime = contract.startTime + period.time;
-      
       console.log(`   - Period ${period.percentage}%: ${elapsed >= period.time ? 
                   '✅ UNLOCKED' : '⏳ PENDING'} (${Math.floor(period.time / 60)}min) ${
                   contract.distributedPeriods.has(period.percentage) ? '[DISTRIBUTED]' : '[WAITING]'}`);
       
-      // Если время разблокировки наступило и мы еще не распределяли этот период
-      if (currentTime >= unlockTime && !contract.distributedPeriods.has(period.percentage)) {
-        // Проверяем есть ли токены для распределения
-        if (BigInt(balance.claimableNow) > 0n) {
-          console.log(`⏰ Time to distribute ${period.percentage}% for contract ${contract.id}`);
-          console.log(`   - Unlock time: ${new Date(unlockTime * 1000).toLocaleString()}`);
-          console.log(`   - Current time: ${new Date(currentTime * 1000).toLocaleString()}`);
-          return { should: true, period: period.percentage };
-        } else {
-          console.log(`   - Period ${period.percentage}% ready but no claimable tokens available`);
-          // Отмечаем период как распределенный, чтобы не проверять его снова
-          contract.distributedPeriods.add(period.percentage);
-        }
+      if (elapsed >= period.time) {
+        currentPeriod = period.percentage;
       }
     }
 
-    // Проверяем, завершен ли весь vesting
-    const allPeriodsDistributed = unlockPeriods.every(p => contract.distributedPeriods.has(p.percentage));
-    if (allPeriodsDistributed) {
-      console.log(`   - All vesting periods completed for contract ${contract.id}`);
-    } else {
-      console.log(`   - No new distribution needed at this time`);
+    // ✅ ИСПРАВЛЕНО: Если есть claimable токены и время разблокировки наступило - распределяем
+    if (currentPeriod > 0) {
+      console.log(`⏰ Time to distribute - current period ${currentPeriod}% unlocked with ${balance.claimableNow} claimable tokens`);
+      console.log(`   - Current time: ${new Date(currentTime * 1000).toLocaleString()}`);
+      return { should: true, period: currentPeriod };
     }
-    
+
+    console.log(`   - No distribution needed: currentPeriod=${currentPeriod}, claimableNow=${balance.claimableNow}`);
     return { should: false };
   }
 
@@ -390,20 +401,27 @@ class AutoDistributionService extends EventEmitter {
     }
   }
 
-  // Раздача Solana токенов - ОБНОВЛЕНО под новый скрипт
+  // Раздача Solana токенов - ЛОГИКА ИЗ 3-claim.js
   private async distributeSolana(contract: VestingContract, period: number): Promise<DistributionResult> {
-    console.log(`🌞 Starting Solana distribution for period ${period}%...`);
+    console.log(`🌞 Starting Solana distribution for period ${period}% using 3-claim.js logic...`);
     
     const connection = new Connection(this.config.solana.rpcUrl, 'confirmed');
     const programId = new PublicKey(this.config.solana.programId);
     const vestingPDA = new PublicKey(contract.address);
-    const mintAddress = new PublicKey(this.config.solana.mintAddress);
     
-    // Создаем keypair из private key
+    // ✅ FIX: Get mint address from vesting account data
+    const vestingAccountInfo = await connection.getAccountInfo(vestingPDA);
+    if (!vestingAccountInfo) {
+      throw new Error('Vesting PDA account not found');
+    }
+    const vestingAccount = this.parseVestingAccount(vestingAccountInfo.data);
+    const mintAddress = new PublicKey(vestingAccount.mint);
+    
+    // Создаем keypair из private key (должен быть тем же что и initializer!)
     const privateKeyArray = JSON.parse(this.config.solana.privateKey);
     const initializer = Keypair.fromSecretKey(Uint8Array.from(privateKeyArray));
     
-    console.log('Initializer address:', initializer.publicKey.toBase58());
+    console.log('Initializer (claim caller) address:', initializer.publicKey.toBase58());
     
     try {
       // Проверяем баланс
@@ -428,15 +446,7 @@ class AutoDistributionService extends EventEmitter {
       );
       console.log('Vault PDA:', vaultPDA.toBase58());
       
-      // Проверяем существует ли vesting аккаунт
-      const vestingAccountInfo = await connection.getAccountInfo(vestingPDA);
-      if (!vestingAccountInfo) {
-        throw new Error('Vesting PDA account not found');
-      }
-      
-      // Парсим данные vesting аккаунта
-      const vestingAccount = this.parseVestingAccount(vestingAccountInfo.data);
-      
+      // ✅ REMOVED: Duplicate vesting account check (already done above)
       if (!vestingAccount.isInitialized) {
         throw new Error('Vesting account not initialized');
       }
@@ -482,27 +492,17 @@ class AutoDistributionService extends EventEmitter {
         programId
       );
       
-      // Создаем инструкцию для распределения токенов
-      const distributionInstruction = new TransactionInstruction({
+      // Создаем claim инструкцию точно как в 3-claim.js
+      const claimInstruction = this.createClaimInstruction(
         programId,
-        keys: [
-          { pubkey: initializer.publicKey, isSigner: true, isWritable: true },
-          { pubkey: vestingPDA, isSigner: false, isWritable: true },
-          { pubkey: vaultPDA, isSigner: false, isWritable: true },
-          { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-          { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
-          { pubkey: vaultAuthority, isSigner: false, isWritable: false },
-          // Добавляем все ATA получателей
-          ...recipientATAs.map(ata => ({ 
-            pubkey: ata, 
-            isSigner: false, 
-            isWritable: true 
-          }))
-        ],
-        data: Buffer.from([2]) // Distribute instruction
-      });
+        initializer.publicKey,      // initializer (signer)
+        vestingPDA,                // vesting PDA
+        vaultPDA,                  // vault PDA
+        vaultAuthority,            // vault authority PDA
+        recipientATAs              // recipient ATAs
+      );
       
-      transaction.add(distributionInstruction);
+      transaction.add(claimInstruction);
       
       // Получаем recent blockhash
       const { blockhash } = await connection.getRecentBlockhash();
@@ -527,10 +527,14 @@ class AutoDistributionService extends EventEmitter {
       // Вычисляем суммы для ответа
       const distributedAmount = BigInt(contractBalance.claimableNow);
       
-      const recipients = contract.recipients.map(r => ({
-        wallet: r.wallet,
-        amount: ((distributedAmount * BigInt(r.percentage)) / 100n).toString()
-      }));
+      // ✅ FIX: Use basis points (10000 = 100%) instead of percentage
+      const recipients = contract.recipients.map(r => {
+        const basisPoints = r.basisPoints || (r.percentage * 100); // Handle both formats
+        return {
+          wallet: r.wallet,
+          amount: ((distributedAmount * BigInt(basisPoints)) / 10000n).toString()
+        };
+      });
       
       return {
         transactionHash: signature,
@@ -546,14 +550,22 @@ class AutoDistributionService extends EventEmitter {
     }
   }
 
-  // Раздача BNB токенов - ОБНОВЛЕНО под новый контракт SecureTokenVesting
+  // Раздача BNB токенов - ЛОГИКА ИЗ claim-tockens.ts
   private async distributeBNB(contract: VestingContract, period: number): Promise<DistributionResult> {
-    console.log(`🟡 Starting BNB distribution for period ${period}%...`);
+    console.log(`🟡 Starting BNB distribution for period ${period}% using ProductionTokenVesting logic...`);
     
     const provider = new ethers.JsonRpcProvider(this.config.bnb.rpcUrl);
     const wallet = new ethers.Wallet(this.config.bnb.privateKey, provider);
     
-    console.log('Wallet address:', wallet.address);
+    console.log('Distribution wallet address:', wallet.address);
+    console.log('Expected beneficiary address:', contract.beneficiaryAddress);
+    
+    // КРИТИЧЕСКИ ВАЖНО: Убеждаемся что wallet соответствует beneficiary
+    // В ProductionTokenVesting distributeTokens() имеет модификатор onlyBeneficiary
+    // который проверяет vestingSchedules[msg.sender].isInitialized
+    if (wallet.address.toLowerCase() !== contract.beneficiaryAddress.toLowerCase()) {
+      throw new Error(`CRITICAL: Wallet ${wallet.address} != beneficiary ${contract.beneficiaryAddress}. distributeTokens() requires beneficiary as msg.sender`);
+    }
     
     try {
       // Проверяем баланс
@@ -564,12 +576,12 @@ class AutoDistributionService extends EventEmitter {
         throw new Error('Insufficient BNB balance for distribution (need at least 0.001 BNB)');
       }
       
-      // ABI для SecureTokenVesting контракта (из первого файла)
+      // ABI для ProductionTokenVesting контракта
       const vestingABI = [
         'function distributeTokens() external',
-        'function getVestingSchedule(address beneficiary) external view returns (bool isInitialized, address token, uint256 startTime, uint256 cliffDuration, uint256 vestingDuration, uint256 totalAmount, uint256 claimedAmount, uint8 recipientCount)',
+        'function getVestingSchedule(address beneficiary) external view returns (bool isInitialized, address token, address authorizedFunder, uint256 startTime, uint256 cliffDuration, uint256 vestingDuration, uint256 totalAmount, uint256 claimedAmount, uint8 recipientCount)',
         'function getClaimableAmount(address beneficiary) external view returns (uint256)',
-        'function getRecipients(address beneficiary) external view returns (tuple(address wallet, uint8 percentage)[])',
+        'function getRecipients(address beneficiary) external view returns (tuple(address wallet, uint16 basisPoints, uint256 claimedAmount, uint256 lastClaimTime)[])',
         'function canDistribute(address beneficiary) external view returns (bool)'
       ];
       
@@ -580,10 +592,22 @@ class AutoDistributionService extends EventEmitter {
       );
       
       // Проверяем, есть ли расписание вестинга
+      console.log(`🔍 Checking vesting schedule for beneficiary: ${contract.beneficiaryAddress}`);
       const schedule = await vestingContract.getVestingSchedule(contract.beneficiaryAddress);
       
       if (!schedule.isInitialized) {
-        throw new Error('No vesting schedule found');
+        throw new Error(`No vesting schedule found for beneficiary ${contract.beneficiaryAddress}`);
+      }
+      
+      console.log(`📋 Vesting schedule confirmed for ${contract.beneficiaryAddress}`);
+      console.log(`   Total amount: ${ethers.formatEther(schedule.totalAmount)} tokens`);
+      console.log(`   Start time: ${schedule.startTime > 0 ? new Date(Number(schedule.startTime) * 1000).toISOString() : 'Not started'}`);
+      
+      // КРИТИЧЕСКИ ВАЖНО: Убеждаемся что wallet соответствует beneficiary
+      // В ProductionTokenVesting distributeTokens() имеет модификатор onlyBeneficiary
+      // который проверяет vestingSchedules[msg.sender].isInitialized
+      if (wallet.address.toLowerCase() !== contract.beneficiaryAddress.toLowerCase()) {
+        throw new Error(`CRITICAL: Wallet ${wallet.address} != beneficiary ${contract.beneficiaryAddress}. distributeTokens() requires beneficiary as msg.sender`);
       }
       
       console.log('✅ Vesting schedule found');
@@ -594,27 +618,68 @@ class AutoDistributionService extends EventEmitter {
       
       // Проверяем, можно ли распределить токены
       const canDistribute = await vestingContract.canDistribute(contract.beneficiaryAddress);
+      console.log(`📋 Can distribute: ${canDistribute}`);
+      
       if (!canDistribute) {
-        throw new Error('Cannot distribute tokens at this time');
+        // Получаем подробную информацию о том, почему нельзя распределить
+        const currentTime = Math.floor(Date.now() / 1000);
+        const cliffEndTime = schedule.startTime + schedule.cliffDuration;
+        const isCliffPassed = currentTime >= cliffEndTime;
+        const lastDistTime = schedule.lastDistributionTime || 0;
+        const cooldownPassed = lastDistTime === 0 || currentTime >= lastDistTime + 60; // 60 seconds cooldown
+        
+        console.log(`❌ Cannot distribute tokens:`);
+        console.log(`   - Cliff passed: ${isCliffPassed} (current: ${currentTime}, cliff end: ${cliffEndTime})`);
+        console.log(`   - Cooldown passed: ${cooldownPassed} (last dist: ${lastDistTime})`);
+        console.log(`   - Is finalized: ${schedule.isInitialized}`);
+        
+        throw new Error('Cannot distribute tokens at this time - see logs above');
       }
       
       const claimableAmount = await vestingContract.getClaimableAmount(contract.beneficiaryAddress);
+      console.log(`📋 Claimable amount: ${ethers.formatEther(claimableAmount)} tokens`);
       
       if (claimableAmount === 0n) {
         throw new Error('No tokens available to distribute');
       }
       
-      console.log(`✅ Claimable amount: ${ethers.formatEther(claimableAmount)} tokens`);
-      
       // ВЫПОЛНЯЕМ РЕАЛЬНОЕ РАСПРЕДЕЛЕНИЕ с помощью distributeTokens()
       console.log('🚀 Executing REAL distribution transaction...');
-      const tx = await vestingContract.distributeTokens({
-        gasLimit: 500000
-      });
       
-      console.log('Transaction hash:', tx.hash);
-      console.log('Waiting for confirmation...');
-      await tx.wait();
+      // Проверяем gas estimate сначала
+      let tx: any;
+      try {
+        const gasEstimate = await vestingContract.distributeTokens.estimateGas();
+        console.log(`📊 Gas estimate: ${gasEstimate.toString()}`);
+        
+        tx = await vestingContract.distributeTokens({
+          gasLimit: gasEstimate + (gasEstimate / 5n) // Add 20% buffer
+        });
+        
+        console.log('Transaction hash:', tx.hash);
+        console.log('Waiting for confirmation...');
+        const receipt = await tx.wait();
+        console.log(`✅ Transaction confirmed in block ${receipt?.blockNumber}`);
+        
+        if (receipt?.status === 0) {
+          throw new Error('Transaction failed (reverted)');
+        }
+      } catch (gasError: any) {
+        console.error('❌ Gas estimation failed:', gasError?.reason || gasError?.message);
+        
+        // If gas estimation fails, the transaction will likely revert
+        // Let's check what the exact error is
+        if (gasError?.reason) {
+          console.error(`❌ Revert reason: ${gasError.reason}`);
+        }
+        if (gasError?.code) {
+          console.error(`❌ Error code: ${gasError.code}`);
+        }
+        
+        // Don't attempt the transaction if gas estimation fails
+        throw new Error(`Distribution failed: ${gasError?.reason || gasError?.message}`);
+      }
+      
       console.log(`✅ Real BNB distribution successful: ${tx.hash}`);
       
       // Получаем получателей для расчета сумм
@@ -622,7 +687,7 @@ class AutoDistributionService extends EventEmitter {
       
       const distributionAmounts = recipients.map((recipient: any) => ({
         wallet: recipient.wallet,
-        amount: ((claimableAmount * BigInt(recipient.percentage)) / 100n).toString()
+        amount: ((claimableAmount * BigInt(recipient.basisPoints)) / 10000n).toString()  // Convert basis points (10000 = 100%)
       }));
       
       return {
@@ -639,49 +704,151 @@ class AutoDistributionService extends EventEmitter {
     }
   }
 
-  // Парсер для Solana vesting аккаунта (обновленная версия)
-  private parseVestingAccount(data: Buffer) {
-    if (!data || data.length < 141) {
-      throw new Error(`Invalid vesting account data. Length: ${data?.length || 0}, expected at least 141`);
+  // Создание claim инструкции точно как в 3-claim.js
+  private createClaimInstruction(
+    programId: PublicKey,
+    initializer: PublicKey,
+    vestingPDA: PublicKey,
+    vaultPDA: PublicKey,
+    vaultAuthority: PublicKey,
+    recipientATAs: PublicKey[]
+  ): TransactionInstruction {
+    // Создаем данные инструкции: только 1 байт (инструкция)
+    const data = Buffer.alloc(1);
+    
+    // Инструкция 2 = Claim (точно как в 3-claim.js)
+    data[0] = 2;
+    
+    // Создаем массив аккаунтов точно как в 3-claim.js
+    const keys = [
+      { pubkey: initializer, isSigner: true, isWritable: true },         // 0. Initializer (signer)
+      { pubkey: vestingPDA, isSigner: false, isWritable: true },         // 1. Vesting PDA
+      { pubkey: vaultPDA, isSigner: false, isWritable: true },           // 2. Vault PDA
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },  // 3. Token Program
+      { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false }, // 4. Clock Sysvar
+      { pubkey: vaultAuthority, isSigner: false, isWritable: false },    // 5. Vault Authority PDA
+    ];
+    
+    // Добавляем ATA получателей (6+) точно как в 3-claim.js
+    for (const ata of recipientATAs) {
+      keys.push({ pubkey: ata, isSigner: false, isWritable: true });
     }
     
-    const recipients = [];
-    let offset = 141; // Start of recipients data
+    return new TransactionInstruction({
+      programId,
+      keys,
+      data,
+    });
+  }
+
+  // ✅ UPDATED: Парсер для Solana vesting аккаунта с basis points (u16)
+  private parseVestingAccount(data: Buffer) {
+    if (!data || data.length < 640) {  // Updated minimum size with basis points
+      throw new Error(`Invalid vesting account data. Length: ${data?.length || 0}, expected at least 640`);
+    }
     
-    const recipientCount = data[130];
+    let offset = 0;
+    
+    const isInitialized = data[offset] !== 0;
+    offset += 1;
+    
+    const initializer = new PublicKey(data.slice(offset, offset + 32)).toString();
+    offset += 32;
+    
+    const mint = new PublicKey(data.slice(offset, offset + 32)).toString();
+    offset += 32;
+    
+    const vault = new PublicKey(data.slice(offset, offset + 32)).toString();
+    offset += 32;
+    
+    const startTime = Number(this.readInt64LE(data, offset));
+    offset += 8;
+    
+    const totalAmount = Number(this.readUint64LE(data, offset));
+    offset += 8;
+    
+    const cliffPeriod = Number(this.readInt64LE(data, offset));
+    offset += 8;
+    
+    const vestingPeriod = Number(this.readInt64LE(data, offset));
+    offset += 8;
+    
+    // ✅ UPDATED: TGE basis points (u16 instead of u8)
+    const tgeBasisPoints = data.readUInt16LE(offset);
+    offset += 2;
+    
+    const recipientCount = data[offset];
+    offset += 1;
+    
+    // ✅ UPDATED: New fields from contract
+    const isFinalized = data[offset] !== 0;
+    offset += 1;
+
+    const lastDistributionTime = Number(this.readInt64LE(data, offset));
+    offset += 8;
+
+    const recipients = [];
     for (let i = 0; i < Math.min(recipientCount, 10); i++) {
-      const wallet = new PublicKey(data.slice(offset, offset + 32));
-      const percentage = data[offset + 32];
-      const claimedAmount = Number(data.readBigUInt64LE(offset + 33));
-      const lastClaimTime = Number(data.readBigInt64LE(offset + 41));
+      // ✅ UPDATED: Each recipient now 50 bytes (32 + 2 + 8 + 8)
+      if (offset + 50 > data.length) {
+        console.warn(`Not enough data for recipient ${i}, stopping parsing`);
+        break;
+      }
+
+      const wallet = new PublicKey(data.slice(offset, offset + 32)).toString();
+      offset += 32;
       
-      if (percentage > 0) {
+      // ✅ UPDATED: Basis points (u16) instead of percentage (u8)
+      const basisPoints = data.readUInt16LE(offset);
+      offset += 2;
+      
+      const claimedAmount = Number(this.readUint64LE(data, offset));
+      offset += 8;
+      
+      const lastClaimTime = Number(this.readInt64LE(data, offset));
+      offset += 8;
+
+      if (basisPoints > 0) {
         recipients.push({
-          wallet: wallet.toBase58(),
-          percentage,
+          wallet,
+          basisPoints,  // ✅ UPDATED: Use basis points
+          percentage: basisPoints / 100,  // ✅ LEGACY: For compatibility
           claimedAmount,
-          lastClaimTime,
+          lastClaimTime
         });
       }
-      offset += 49;
     }
     
     return {
-      isInitialized: data[0] === 1,
-      initializer: new PublicKey(data.slice(1, 33)),
-      mint: new PublicKey(data.slice(33, 65)),
-      vault: new PublicKey(data.slice(65, 97)),
-      startTime: Number(data.readBigInt64LE(97)),
-      totalAmount: Number(data.readBigUInt64LE(105)),
-      cliffPeriod: Number(data.readBigInt64LE(113)),
-      vestingPeriod: Number(data.readBigInt64LE(121)),
-      tgePercentage: data[129],
-      recipientCount: data[130],
-      isRevoked: data[131] === 1,
-      isFinalized: data[132] === 1,
-      lastDistributionTime: Number(data.readBigInt64LE(133)),
-      recipients,
+      isInitialized,
+      initializer,
+      mint,
+      vault,
+      startTime,
+      totalAmount,
+      cliffPeriod,
+      vestingPeriod,
+      tgeBasisPoints,  // ✅ UPDATED: Use basis points
+      recipientCount,
+      isFinalized,  // ✅ UPDATED: New field
+      lastDistributionTime,  // ✅ UPDATED: New field
+      recipients
     };
+  }
+
+  // ✅ ADDED: Helper methods for reading BigInt from buffer
+  private readUint64LE(buffer: Buffer, offset: number): bigint {
+    const low = buffer.readUInt32LE(offset);
+    const high = buffer.readUInt32LE(offset + 4);
+    return BigInt(low) + (BigInt(high) << 32n);
+  }
+
+  private readInt64LE(buffer: Buffer, offset: number): bigint {
+    const value = this.readUint64LE(buffer, offset);
+    if (value >= 0x8000000000000000n) {
+      return value - 0x10000000000000000n;
+    }
+    return value;
   }
 
   // Загрузка существующих контрактов
@@ -711,7 +878,25 @@ class AutoDistributionService extends EventEmitter {
       }
       
       // Добавляем BNB контракт если есть конфигурация
+      console.log('🔍 BNB Configuration check:');
+      console.log(`  - Contract Address: ${this.config.bnb.contractAddress || 'MISSING'}`);
+      console.log(`  - Private Key: ${this.config.bnb.privateKey ? 'SET' : 'MISSING'}`);
+      console.log(`  - Known Initializer: ${this.config.bnb.knownInitializer || 'MISSING'}`);
+      
       if (this.config.bnb.contractAddress && this.config.bnb.privateKey && this.config.bnb.knownInitializer) {
+        // Проверим, что адрес из приватного ключа соответствует known initializer
+        try {
+          const wallet = new ethers.Wallet(this.config.bnb.privateKey);
+          console.log(`  - Wallet address from private key: ${wallet.address}`);
+          console.log(`  - Expected initializer: ${this.config.bnb.knownInitializer}`);
+          
+          if (wallet.address.toLowerCase() !== this.config.bnb.knownInitializer.toLowerCase()) {
+            console.log(`⚠️  WARNING: Private key wallet (${wallet.address}) != known initializer (${this.config.bnb.knownInitializer})`);
+          }
+        } catch (error) {
+          console.log(`❌ Invalid BNB private key format:`, error);
+        }
+        
         contracts.push({
           chain: 'bnb',
           address: this.config.bnb.contractAddress,
@@ -727,6 +912,7 @@ class AutoDistributionService extends EventEmitter {
         console.log(`✅ Configured BNB contract: ${this.config.bnb.contractAddress}`);
       } else {
         console.log(`⚠️  BNB contract not configured - missing private key, contract address, or initializer`);
+        console.log(`   Set BNB_CONTRACT_ADDRESS, BNB_PRIVATE_KEY, and KNOWN_INITIALIZER environment variables`);
       }
 
       // Добавляем все сконфигурированные контракты
@@ -819,7 +1005,7 @@ class AutoDistributionService extends EventEmitter {
         percentage: r.percentage
       }));
 
-      // Определяем уже распределенные периоды на основе claimed amounts
+      // ✅ ИСПРАВЛЕНО: Определяем уже распределенные периоды на основе claimed amounts
       const totalClaimed = vestingAccount.recipients.reduce((sum, r) => sum + BigInt(r.claimedAmount), 0n);
       const totalAmount = BigInt(vestingAccount.totalAmount);
       
@@ -828,13 +1014,20 @@ class AutoDistributionService extends EventEmitter {
         
         console.log(`   - Claimed percentage: ${claimedPercentage}%`);
         
-        // Определяем какие периоды уже были распределены
-        if (claimedPercentage >= 95) contract.distributedPeriods.add(100);
-        if (claimedPercentage >= 45) contract.distributedPeriods.add(50);
-        if (claimedPercentage >= 18) contract.distributedPeriods.add(20);
-        if (claimedPercentage >= 8) contract.distributedPeriods.add(10);
+        // ✅ ИСПРАВЛЕНО: Более точные пороги для определения завершённых периодов
+        contract.distributedPeriods.clear(); // Сбрасываем и пересчитываем
+        
+        if (claimedPercentage >= 9.5) contract.distributedPeriods.add(10);   // 10% ± погрешность
+        if (claimedPercentage >= 19.5) contract.distributedPeriods.add(20);  // 20% ± погрешность  
+        if (claimedPercentage >= 49.5) contract.distributedPeriods.add(50);  // 50% ± погрешность
+        if (claimedPercentage >= 99.5) contract.distributedPeriods.add(100); // 100% ± погрешность
         
         contract.totalDistributed = totalClaimed.toString();
+        
+        console.log(`   - Recalculated distributed periods based on claimed amount: [${Array.from(contract.distributedPeriods).join(', ')}]`);
+      } else {
+        // Если ничего не заклеймлено, сбрасываем все периоды
+        contract.distributedPeriods.clear();
       }
       
       console.log(`✅ Loaded ${vestingAccount.recipients.length} recipients for Solana contract`);
@@ -852,8 +1045,8 @@ class AutoDistributionService extends EventEmitter {
     try {
       const provider = new ethers.JsonRpcProvider(this.config.bnb.rpcUrl);
       const vestingABI = [
-        'function getVestingSchedule(address beneficiary) external view returns (bool isInitialized, address token, uint256 startTime, uint256 cliffDuration, uint256 vestingDuration, uint256 totalAmount, uint256 claimedAmount, uint8 recipientCount)',
-        'function getRecipients(address beneficiary) external view returns (tuple(address wallet, uint8 percentage)[])',
+        'function getVestingSchedule(address beneficiary) external view returns (bool isInitialized, address token, address authorizedFunder, uint256 startTime, uint256 cliffDuration, uint256 vestingDuration, uint256 totalAmount, uint256 claimedAmount, uint8 recipientCount)',
+        'function getRecipients(address beneficiary) external view returns (tuple(address wallet, uint16 basisPoints, uint256 claimedAmount, uint256 lastClaimTime)[])',
         'function getClaimableAmount(address beneficiary) external view returns (uint256)'
       ];
       
@@ -866,15 +1059,21 @@ class AutoDistributionService extends EventEmitter {
       );
       
       // Получаем расписание вестинга
+      console.log(`🔍 Checking vesting schedule for beneficiary: ${contract.beneficiaryAddress}`);
       const schedule = await vestingContract.getVestingSchedule(contract.beneficiaryAddress);
+      console.log(`📋 Schedule found:`, {
+        isInitialized: schedule.isInitialized,
+        startTime: schedule.startTime.toString(),
+        totalAmount: ethers.formatEther(schedule.totalAmount)
+      });
       
       if (!schedule.isInitialized) {
         console.warn(`⚠️  No vesting schedule found for beneficiary ${contract.beneficiaryAddress}`);
         return;
       }
 
-      // Обновляем время старта
-      contract.startTime = Number(schedule.startTime);
+      // Обновляем время старта (safely convert BigInt to number)
+      contract.startTime = schedule.startTime > 0n ? Number(schedule.startTime) : 0;
       
       // Проверяем доступные для клейма токены
       const claimableAmount = await vestingContract.getClaimableAmount(contract.beneficiaryAddress);
@@ -894,19 +1093,27 @@ class AutoDistributionService extends EventEmitter {
         return;
       }
 
-      // Определяем уже распределенные периоды на основе claimed amount
+      // ✅ ИСПРАВЛЕНО: Проверяем реальное состояние контракта для определения периодов
       if (schedule.claimedAmount > 0n) {
         const claimedPercentage = Number((schedule.claimedAmount * 100n) / schedule.totalAmount);
         
         console.log(`   - Claimed percentage: ${claimedPercentage}%`);
         
-        // Определяем какие периоды уже были распределены
-        if (claimedPercentage >= 95) contract.distributedPeriods.add(100);
-        if (claimedPercentage >= 45) contract.distributedPeriods.add(50);
-        if (claimedPercentage >= 18) contract.distributedPeriods.add(20);
-        if (claimedPercentage >= 8) contract.distributedPeriods.add(10);
+        // ✅ ИСПРАВЛЕНО: Более точные пороги для определения завершённых периодов
+        // Учитываем что каждый период может распределяться частично
+        contract.distributedPeriods.clear(); // Сбрасываем и пересчитываем
+        
+        if (claimedPercentage >= 9.5) contract.distributedPeriods.add(10);   // 10% ± погрешность
+        if (claimedPercentage >= 19.5) contract.distributedPeriods.add(20);  // 20% ± погрешность  
+        if (claimedPercentage >= 49.5) contract.distributedPeriods.add(50);  // 50% ± погрешность
+        if (claimedPercentage >= 99.5) contract.distributedPeriods.add(100); // 100% ± погрешность
         
         contract.totalDistributed = schedule.claimedAmount.toString();
+        
+        console.log(`   - Recalculated distributed periods based on claimed amount: [${Array.from(contract.distributedPeriods).join(', ')}]`);
+      } else {
+        // Если ничего не заклеймлено, сбрасываем все периоды
+        contract.distributedPeriods.clear();
       }
 
       // Получаем получателей
@@ -915,7 +1122,7 @@ class AutoDistributionService extends EventEmitter {
         
         contract.recipients = recipients.map((r: any) => ({
           wallet: r.wallet,
-          percentage: Number(r.percentage)
+          percentage: Number(r.basisPoints) / 100  // Convert basis points to percentage for display
         }));
 
         console.log(`✅ Loaded ${contract.recipients.length} recipients for BNB contract`);

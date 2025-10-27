@@ -17,6 +17,11 @@ export const ClaimInterface: React.FC<ClaimInterfaceProps> = ({
   userAddress,
   onClaimSuccess
 }) => {
+  // ✅ UPDATED: Hide ClaimInterface for BNB recipients (they should use IndividualClaimButton)
+  // Only show for initializers or Solana users
+  if (chain === 'bnb' && vestingData.userRole.isRecipient && !vestingData.userRole.isInitializer) {
+    return null; // BNB recipients use IndividualClaimButton instead
+  }
   const [claiming, setClaiming] = useState(false);
   const [claimResult, setClaimResult] = useState<{
     success: boolean;
@@ -204,7 +209,7 @@ export const ClaimInterface: React.FC<ClaimInterfaceProps> = ({
           <h4>Distribution Preview</h4>
           <div className="distribution-list">
             {vestingData.recipients.map((recipient, index) => {
-              const share = (BigInt(vestingData.progress.claimableAmount) * BigInt(recipient.percentage)) / 100n;
+              const share = (BigInt(vestingData.progress.claimableAmount) * BigInt(recipient.percentage || 0)) / 100n;
               return (
                 <div key={index} className="distribution-item">
                   <span className="recipient-address">
@@ -231,7 +236,7 @@ export const ClaimInterface: React.FC<ClaimInterfaceProps> = ({
             </div>
             <div className="share-amount">
               {vestingService.formatTokenAmount(
-                ((BigInt(vestingData.progress.claimableAmount) * BigInt(vestingData.userRole.recipientData.percentage)) / 100n).toString(),
+                ((BigInt(vestingData.progress.claimableAmount) * BigInt(vestingData.userRole.recipientData.percentage || 0)) / 100n).toString(),
                 chain === 'solana' ? 9 : 18
               )} tokens
             </div>

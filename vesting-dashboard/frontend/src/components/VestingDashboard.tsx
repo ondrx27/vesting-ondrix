@@ -6,29 +6,40 @@ import { LoadingSpinner } from './LoadingSpinnet';
 import { ErrorMessage } from './ErrorMessage';
 import { VestingOverview } from './VestingOverview';
 import { VestingDetails } from './VestingDetails';
+import { TGEDisplay } from './TGEDisplay';
 import { RecipientsList } from './RecipientsList';
 import { ClaimInterface } from './ClaimInterface';
+import { IndividualClaimButton } from './IndividualClaimButton';
 import type { VestingData } from '../types/vesting';
 import { RefreshCw } from 'lucide-react';
 
 export const VestingDashboard: React.FC = () => {
-  const { isConnected, address, chain, provider, solanaConnection } = useWallet();
+  const { isConnected, address, chain, provider, signer, solanaConnection } = useWallet();
   const [vestingData, setVestingData] = useState<VestingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoRefresh, setAutoRefresh] = useState(false); // ⚠️ ВРЕМЕННО отключен auto-refresh для тестирования individual claims
 
   const vestingService = new VestingService();
 
   const fetchVestingData = async () => {
     try {
+      console.log('🔄 Fetching vesting data with params:', {
+        chain,
+        address,
+        hasProvider: !!provider,
+        hasSolanaConnection: !!solanaConnection
+      });
+      
       setLoading(true);
       setError(null);
 
       let data: VestingData | null = null;
 
       if (chain === 'bnb') {
+        // Always pass the provider if available, regardless of connection status
+        console.log('Calling fetchBNBVestingData', { address, hasProvider: !!provider });
         data = await vestingService.fetchBNBVestingData(address, provider || undefined);
       } else if (chain === 'solana' && solanaConnection) {
         data = await vestingService.fetchSolanaVestingData(address, solanaConnection);
@@ -49,6 +60,12 @@ export const VestingDashboard: React.FC = () => {
   };
 
   useEffect(() => {
+    console.log('🔄 VestingDashboard useEffect triggered:', {
+      chain,
+      address,
+      hasProvider: !!provider,
+      hasSolanaConnection: !!solanaConnection
+    });
     fetchVestingData();
   }, [chain, address, provider, solanaConnection]);
 
@@ -57,7 +74,7 @@ export const VestingDashboard: React.FC = () => {
 
     const interval = setInterval(() => {
       fetchVestingData();
-    }, 30000);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, [autoRefresh, chain, address]);
@@ -135,7 +152,7 @@ export const VestingDashboard: React.FC = () => {
             checked={autoRefresh}
             onChange={toggleAutoRefresh}
           />
-          Auto-refresh (30s)
+          Auto-refresh (15s)
         </label>
         
         {lastUpdated && (
@@ -181,6 +198,9 @@ export const VestingDashboard: React.FC = () => {
         claimStatus={vestingData.claimStatus}
       />
 
+      {/* TGE Display - Only for Solana */}
+      <TGEDisplay schedule={vestingData.schedule} />
+
       {/* Detailed Information */}
       <VestingDetails 
         schedule={vestingData.schedule}
@@ -196,6 +216,26 @@ export const VestingDashboard: React.FC = () => {
         showFullList={showFullData}
         chain={chain} 
       />
+
+      {/* Backend Claim Interface - Only for initializers */}
+      {isConnected && address && vestingData.userRole.isInitializer && (
+        <ClaimInterface
+          vestingData={vestingData}
+          chain={chain}
+          userAddress={address}
+          onClaimSuccess={fetchVestingData}
+        />
+      )}
+
+      {/* Individual Claim Button - Only for BNB recipients with connected wallet */}
+      {isConnected && address && provider && chain === 'bnb' && vestingData.userRole.isRecipient && (
+        <IndividualClaimButton
+          vestingData={vestingData}
+          chain={chain}
+          userAddress={address}
+          onClaimSuccess={fetchVestingData}
+        />
+      )}
 
       {error && (
         <ErrorMessage 

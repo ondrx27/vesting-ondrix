@@ -2640,3 +2640,542 @@ input:focus {
   font-weight: 500;
 }
 
+/* Individual Claim Section */
+.individual-claim-section {
+  background: linear-gradient(145deg, #1a1a1a, #2a2a2a);
+  border: 1px solid #333;
+  border-radius: 16px;
+  padding: 30px;
+  margin-top: 30px;
+}
+
+.individual-claim-header {
+  margin-bottom: 25px;
+  border-bottom: 2px solid #333;
+  padding-bottom: 15px;
+}
+
+.individual-claim-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #00ff88;
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 0 0 10px 0;
+}
+
+.claim-description {
+  color: #888;
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.recipient-allocation {
+  background: rgba(0, 255, 136, 0.05);
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 25px;
+  border: 1px solid #00ff88;
+}
+
+.allocation-info,
+.claimable-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.allocation-info:last-child,
+.claimable-info:last-child {
+  margin-bottom: 0;
+}
+
+.allocation-info .label,
+.claimable-info .label {
+  color: #888;
+  font-size: 0.95rem;
+}
+
+.allocation-info .value,
+.claimable-info .value {
+  font-weight: 600;
+  color: #00ff88;
+  font-family: monospace;
+}
+
+.individual-claim-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #00ff88, #00cc6a);
+  color: #000;
+  border: none;
+  padding: 18px 24px;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.individual-claim-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #00cc6a, #00aa55);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 255, 136, 0.4);
+}
+
+.individual-claim-btn:disabled {
+  background: #333;
+  color: #666;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.no-claim-available {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px;
+  background: rgba(255, 136, 0, 0.1);
+  border-radius: 12px;
+  color: #ff8800;
+  margin-bottom: 20px;
+  border: 1px solid #ff8800;
+  font-size: 0.95rem;
+}
+
+.individual-claim-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 15px;
+  background: rgba(0, 136, 255, 0.1);
+  border-radius: 12px;
+  font-size: 0.9rem;
+  color: #888;
+  border: 1px solid #0088ff;
+  line-height: 1.4;
+}
+
+.claim-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  border: 1px solid transparent;
+}
+
+.claim-result.success {
+  background: rgba(0, 255, 136, 0.1);
+  border-color: #00ff88;
+  color: #00ff88;
+}
+
+.claim-result.error {
+  background: rgba(255, 68, 68, 0.1);
+  border-color: #ff4444;
+  color: #ff4444;
+}
+
+.result-content {
+  flex: 1;
+}
+
+.result-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 1.05rem;
+}
+
+.result-amount {
+  font-size: 0.95rem;
+  opacity: 0.9;
+  margin-bottom: 10px;
+  font-family: monospace;
+}
+
+.result-error {
+  font-size: 0.95rem;
+  opacity: 0.9;
+  line-height: 1.4;
+}
+
+.view-transaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: inherit;
+  text-decoration: underline;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.view-transaction:hover {
+  opacity: 1;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* WalletConnect Modal Styles */
+.walletconnect-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  position: relative;
+  background: linear-gradient(145deg, #1a1a1a, #2a2a2a);
+  border-radius: 16px;
+  border: 1px solid #333;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  max-width: 400px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 25px;
+  border-bottom: 1px solid #333;
+}
+
+.modal-header h3 {
+  color: #00ff88;
+  margin: 0;
+  font-size: 1.3em;
+  font-weight: 600;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ff4444;
+}
+
+.modal-body {
+  padding: 25px;
+  text-align: center;
+}
+
+/* WalletConnect QR Styles */
+.walletconnect-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.qr-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-canvas {
+  border: 2px solid #333;
+  border-radius: 12px;
+  background: white;
+  padding: 10px;
+  transition: opacity 0.3s ease;
+}
+
+.qr-canvas.generating {
+  opacity: 0.5;
+}
+
+.qr-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-instructions {
+  text-align: center;
+}
+
+.qr-instructions p {
+  color: #00ff88;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  font-size: 1.1em;
+}
+
+.qr-instructions small {
+  color: #888;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+.qr-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.copy-uri-btn,
+.refresh-qr-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #444;
+  border-radius: 8px;
+  color: #ccc;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.copy-uri-btn:hover,
+.refresh-qr-btn:hover {
+  background: rgba(0, 255, 136, 0.1);
+  border-color: #00ff88;
+  color: #00ff88;
+  transform: translateY(-1px);
+}
+
+.copy-uri-btn:active,
+.refresh-qr-btn:active {
+  transform: translateY(0);
+}
+
+.qr-error-message {
+  padding: 10px;
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid #ff4444;
+  border-radius: 8px;
+  color: #ff4444;
+  font-size: 0.9em;
+  text-align: center;
+}
+
+.connection-timeout {
+  text-align: center;
+  padding: 10px;
+  background: rgba(255, 136, 0, 0.1);
+  border: 1px solid #ff8800;
+  border-radius: 8px;
+  font-size: 0.85em;
+}
+
+.connection-timeout p {
+  color: #ff8800;
+  margin: 0 0 4px 0;
+  font-weight: 600;
+}
+
+.connection-timeout small {
+  color: #888;
+  line-height: 1.3;
+}
+
+.qr-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px dashed #444;
+  border-radius: 12px;
+  color: #888;
+  font-weight: 500;
+  gap: 10px;
+  padding: 20px;
+}
+
+.qr-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 68, 68, 0.1);
+  border: 2px dashed #ff4444;
+  border-radius: 12px;
+  color: #ff4444;
+  font-weight: 500;
+  gap: 10px;
+  padding: 20px;
+}
+
+/* WalletConnect Success */
+.walletconnect-success {
+  margin-top: 20px;
+  padding: 20px;
+  background: rgba(0, 255, 136, 0.1);
+  border-radius: 12px;
+  border: 1px solid #00ff88;
+}
+
+.success-message p:first-child {
+  color: #00ff88;
+  font-weight: 600;
+  font-size: 1.1em;
+  margin-bottom: 8px;
+}
+
+.success-message p:last-of-type {
+  color: #ccc;
+  font-family: monospace;
+  font-size: 0.9em;
+  word-break: break-all;
+  margin-bottom: 15px;
+}
+
+/* WalletConnect Button Styles */
+.walletconnect-btn {
+  background: linear-gradient(145deg, #2196f3, #1976d2) !important;
+}
+
+.walletconnect-btn:hover:not(:disabled) {
+  background: linear-gradient(145deg, #1976d2, #1565c0) !important;
+  box-shadow: 0 8px 25px rgba(33, 150, 243, 0.4) !important;
+}
+
+.fallback-message {
+  color: #888;
+  margin-bottom: 15px;
+  font-size: 0.95em;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 480px) {
+  .modal-content {
+    width: 95%;
+    max-width: none;
+    margin: 20px;
+  }
+
+  .modal-header {
+    padding: 15px 20px;
+  }
+
+  .modal-header h3 {
+    font-size: 1.2em;
+  }
+
+  .modal-body {
+    padding: 20px;
+  }
+
+  .walletconnect-qr canvas {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .qr-instructions p {
+    font-size: 1em;
+  }
+}
+
+/* Simple WalletConnect Styles */
+.simple-walletconnect {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  align-items: center;
+}
+
+.qr-section {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.connecting-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px;
+  text-align: center;
+}
+
+.connecting-status p {
+  color: #00ff88;
+  font-weight: 600;
+  margin: 0;
+}
+
+.connecting-status small {
+  color: #888;
+  line-height: 1.4;
+}
+
+.retry-btn {
+  margin-left: 10px;
+  padding: 6px 12px;
+  background: rgba(0, 255, 136, 0.1);
+  border: 1px solid #00ff88;
+  border-radius: 6px;
+  color: #00ff88;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: all 0.3s ease;
+}
+
+.retry-btn:hover {
+  background: rgba(0, 255, 136, 0.2);
+  transform: translateY(-1px);
+}
+
+.connected-address {
+  font-family: monospace !important;
+  font-size: 0.9em !important;
+  word-break: break-all;
+  margin: 5px 0 15px 0 !important;
+}
+

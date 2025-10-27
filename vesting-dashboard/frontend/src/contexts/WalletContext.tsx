@@ -19,14 +19,20 @@ export interface WalletState {
   chain: SupportedChain;
   isConnecting: boolean;
   error: string | null;
-  
+
   provider: ethers.BrowserProvider | null;
   signer: ethers.JsonRpcSigner | null;
-  
+
   solanaConnection: Connection | null;
   solanaPublicKey: PublicKey | null;
   solanaWallet: any;
-  
+
+  // Reown integration
+  reownAddress: string | null;
+  reownProvider: ethers.BrowserProvider | null;
+  setReownConnection: (address: string | null, provider: ethers.BrowserProvider | null) => void;
+  disconnectReown: () => Promise<void>;
+
   connect: () => Promise<void>;
   disconnect: () => void;
   switchChain: (chain: SupportedChain) => void;
@@ -46,30 +52,7 @@ interface WalletProviderProps {
   children: ReactNode;
 }
 
-function getMetaMaskProvider() {
-  if (typeof window === 'undefined') return null;
-
-  if (window.ethereum?.providers?.length) {
-    const metamaskProvider = window.ethereum.providers.find((provider: any) => provider.isMetaMask && !provider.isPhantom);
-    if (metamaskProvider) {
-      return metamaskProvider;
-    }
-  }
-
-  if (window.ethereum?.isMetaMask && !window.ethereum?.isPhantom) {
-    return window.ethereum;
-  }
-
-  if (window.ethereum?._metamask) {
-    return window.ethereum;
-  }
-
-  if ((window as any).metamask) {
-    return (window as any).metamask;
-  }
-
-  return null;
-}
+// MetaMask support removed - using only Reown/WalletConnect for BNB chain
 
 function getPhantomProvider() {
   if (typeof window === 'undefined') return null;
@@ -118,12 +101,26 @@ const WalletProviderInner: React.FC<WalletProviderProps> = ({ children }) => {
   const [chain, setChain] = useState<SupportedChain>('bnb');
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
   const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
-  
+
+  // Reown state
+  const [reownAddress, setReownAddress] = useState<string | null>(null);
+  const [reownProvider, setReownProvider] = useState<ethers.BrowserProvider | null>(null);
+
+  // Debug: log when address changes
+  React.useEffect(() => {
+    console.log('🔍 WalletContext address changed:', {
+      address,
+      isConnected,
+      reownAddress,
+      source: address === reownAddress ? 'reown' : address ? 'other' : 'none'
+    });
+  }, [address, isConnected, reownAddress]);
+
   const [solanaConnection, setSolanaConnection] = useState<Connection | null>(null);
-  
+
   let solanaWallet: any = null;
   try {
     if (chain === 'solana') {
@@ -160,76 +157,8 @@ const WalletProviderInner: React.FC<WalletProviderProps> = ({ children }) => {
   }, [solanaWallet?.connecting, chain]);
 
   const connectBNB = async () => {
-    if (chain !== 'bnb') {
-      throw new Error('Switch to BNB chain first');
-    }
-
-    const metamaskProvider = getMetaMaskProvider();
-    
-    if (!metamaskProvider) {
-      throw new Error('MetaMask is not installed or not detected. Please install MetaMask extension and make sure it\'s enabled.');
-    }
-
-    console.log('🦊 Using MetaMask provider:', {
-      isMetaMask: metamaskProvider.isMetaMask,
-      isPhantom: metamaskProvider.isPhantom,
-      hasMetamaskFlag: !!metamaskProvider._metamask
-    });
-
-    const provider = new ethers.BrowserProvider(metamaskProvider);
-    
-    try {
-      console.log('🔗 Requesting account access...');
-      await metamaskProvider.request({ method: 'eth_requestAccounts' });
-      
-      const signer = await provider.getSigner();
-      const address = await signer.getAddress();
-      
-      console.log('✅ Connected to MetaMask:', address);
-      
-      try {
-        console.log('🔄 Switching to BSC Testnet...');
-        await metamaskProvider.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0x61' }],
-        });
-      } catch (switchError: any) {
-        console.log('🔄 Network not found, adding BSC Testnet...');
-        if (switchError.code === 4902) {
-          await metamaskProvider.request({
-            method: 'wallet_addEthereumChain',
-            params: [{
-              chainId: '0x61',
-              chainName: 'BSC Testnet',
-              nativeCurrency: {
-                name: 'BNB',
-                symbol: 'BNB',
-                decimals: 18,
-              },
-              rpcUrls: ['https://data-seed-prebsc-1-s1.bnbchain.org:8545'],
-              blockExplorerUrls: ['https://testnet.bscscan.com'],
-            }],
-          });
-        } else {
-          throw switchError;
-        }
-      }
-
-      setProvider(provider);
-      setSigner(signer);
-      setAddress(address);
-      setIsConnected(true);
-      
-    } catch (error: any) {
-      console.error('❌ MetaMask connection error:', error);
-      if (error.code === 4001) {
-        throw new Error('Connection rejected by user');
-      } else if (error.code === -32002) {
-        throw new Error('Connection request already pending. Please check MetaMask.');
-      } else {
-        throw new Error(`MetaMask connection failed: ${error.message}`);
-      }
-    }
+    // BNB connections now handled through Reown only
+    throw new Error('BNB connections are now handled through WalletConnect/Reown. Use the WalletConnect button.');
   };
 
   const connectSolana = async () => {
@@ -248,7 +177,7 @@ const WalletProviderInner: React.FC<WalletProviderProps> = ({ children }) => {
   const connect = async () => {
     setIsConnecting(true);
     setError(null);
-    
+
     try {
       if (chain === 'bnb') {
         await connectBNB();
@@ -269,10 +198,13 @@ const WalletProviderInner: React.FC<WalletProviderProps> = ({ children }) => {
     setIsConnected(false);
     setAddress(null);
     setError(null);
-    
+
     if (chain === 'bnb') {
       setProvider(null);
       setSigner(null);
+      // Also clear Reown state
+      setReownAddress(null);
+      setReownProvider(null);
     } else if (chain === 'solana' && solanaWallet) {
       try {
         await solanaWallet.disconnect();
@@ -290,51 +222,157 @@ const WalletProviderInner: React.FC<WalletProviderProps> = ({ children }) => {
     }
   };
 
-  useEffect(() => {
-    if (chain === 'bnb') {
-      const metamaskProvider = getMetaMaskProvider();
-      
-      if (metamaskProvider) {
-        const handleAccountsChanged = (accounts: string[]) => {
-          console.log('🔄 MetaMask accounts changed:', accounts);
-          if (accounts.length === 0) {
-            disconnect();
-          } else if (accounts[0] !== address) {
-            setAddress(accounts[0]);
-          }
-        };
+  // MetaMask event listeners removed - using only Reown/WalletConnect for BNB
 
-        const handleChainChanged = (chainId: string) => {
-          console.log('🔄 MetaMask chain changed:', chainId);
-          window.location.reload();
-        };
+  // MetaMask detection removed - using only Reown/WalletConnect for BNB
 
-        metamaskProvider.on('accountsChanged', handleAccountsChanged);
-        metamaskProvider.on('chainChanged', handleChainChanged);
-        
-        return () => {
-          metamaskProvider.removeListener('accountsChanged', handleAccountsChanged);
-          metamaskProvider.removeListener('chainChanged', handleChainChanged);
-        };
+  // Function to handle Reown connection
+  const setReownConnection = (reownAddr: string | null, reownProv: ethers.BrowserProvider | null) => {
+    console.log('🔗 WalletContext setReownConnection called:', {
+      reownAddr,
+      hasProvider: !!reownProv,
+      currentChain: chain,
+      currentAddress: address
+    });
+
+    setReownAddress(reownAddr);
+    setReownProvider(reownProv);
+
+    // If BNB chain and Reown is connecting, prioritize it
+    if (chain === 'bnb' && reownAddr && reownProv) {
+      console.log('✅ Setting Reown as active connection for BNB');
+
+      setIsConnected(true);
+      setAddress(reownAddr);
+      setProvider(reownProv);
+
+      // Don't try to get signer immediately - let it be lazy loaded when needed
+      // This prevents the -32002 error from multiple pending requests
+      console.log('🔄 Reown provider set, signer will be obtained when needed');
+      setSigner(null);
+    } else if (!reownAddr) {
+      // Reown disconnected - reset if it was the active connection
+      if (reownAddress === address) {
+        setIsConnected(false);
+        setAddress(null);
+        setProvider(null);
+        setSigner(null);
       }
     }
-  }, [chain, address]);
+  };
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      console.log('🔍 Wallet detection:', {
-        hasWindowEthereumProviders: !!window.ethereum?.providers,
-        providersCount: window.ethereum?.providers?.length || 0,
-        hasWindowEthereum: !!window.ethereum,
-        ethereumIsMetaMask: !!window.ethereum?.isMetaMask,
-        ethereumIsPhantom: !!window.ethereum?.isPhantom,
-        hasPhantomSolana: !!window.phantom?.solana,
-        hasSolana: !!window.solana,
-        metamaskProvider: !!getMetaMaskProvider(),
-        phantomProvider: !!getPhantomProvider()
-      });
+  // Function to disconnect Reown completely
+  const disconnectReown = async () => {
+    console.log('🔌 WalletContext disconnectReown called');
+
+    try {
+      // СНАЧАЛА отключаемся через AppKit API
+      try {
+        const reownDisconnectFn = (window as any).__reownDisconnect;
+        if (reownDisconnectFn) {
+          console.log('🔄 Calling AppKit.disconnect()...');
+          await reownDisconnectFn();
+          console.log('✅ AppKit.disconnect() completed');
+        } else {
+          console.log('⚠️ AppKit disconnect function not available');
+        }
+      } catch (appKitError) {
+        console.warn('⚠️ AppKit disconnect failed:', appKitError);
+      }
+
+      // Затем очищаем хранилище
+      console.log('📋 All localStorage keys before clearing:', Object.keys(localStorage));
+
+      // Clear ALL storage types
+      console.log('🧹 Clearing ALL storage types...');
+
+      // 1. Clear localStorage and sessionStorage
+      localStorage.clear();
+      sessionStorage.clear();
+
+      // 2. Clear IndexedDB databases (WalletConnect может использовать)
+      try {
+        const databases = await indexedDB.databases();
+        console.log('🗄️ Found IndexedDB databases:', databases.map(db => db.name));
+
+        for (const db of databases) {
+          if (db.name && (db.name.includes('walletconnect') || db.name.includes('reown') || db.name.includes('w3m'))) {
+            console.log(`🗑️ Deleting database: ${db.name}`);
+            const deleteReq = indexedDB.deleteDatabase(db.name);
+            await new Promise((resolve, reject) => {
+              deleteReq.onsuccess = () => resolve(void 0);
+              deleteReq.onerror = () => reject(deleteReq.error);
+            });
+          }
+        }
+      } catch (idbError) {
+        console.warn('⚠️ IndexedDB cleanup failed:', idbError);
+      }
+
+      // 3. Clear any cookies related to WalletConnect/Reown
+      try {
+        document.cookie.split(";").forEach(function(c) {
+          const cookieName = c.replace(/^ +/, "").replace(/=.*/, "");
+          if (cookieName.includes('walletconnect') || cookieName.includes('reown') || cookieName.includes('w3m')) {
+            document.cookie = cookieName + "=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+          }
+        });
+      } catch (cookieError) {
+        console.warn('⚠️ Cookie cleanup failed:', cookieError);
+      }
+
+      // 4. Clear Service Workers (могут кэшировать состояние)
+      try {
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          console.log('🔧 Found Service Workers:', registrations.length);
+          for (const registration of registrations) {
+            if (registration.scope.includes('reown') || registration.scope.includes('walletconnect')) {
+              console.log('🗑️ Unregistering Service Worker:', registration.scope);
+              await registration.unregister();
+            }
+          }
+        }
+      } catch (swError) {
+        console.warn('⚠️ Service Worker cleanup failed:', swError);
+      }
+
+      // 5. Clear Cache API
+      try {
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          console.log('💾 Found caches:', cacheNames);
+          for (const cacheName of cacheNames) {
+            if (cacheName.includes('reown') || cacheName.includes('walletconnect') || cacheName.includes('w3m')) {
+              console.log('🗑️ Deleting cache:', cacheName);
+              await caches.delete(cacheName);
+            }
+          }
+        }
+      } catch (cacheError) {
+        console.warn('⚠️ Cache API cleanup failed:', cacheError);
+      }
+
+      console.log('🧹 Cleared ALL storage types');
+
+      // Устанавливаем флаг что пользователь отключился намеренно
+      localStorage.setItem('reown-manually-disconnected', 'true');
+      console.log('🏴 Set manual disconnect flag');
+
+      // Clear state
+      setReownAddress(null);
+      setReownProvider(null);
+      setIsConnected(false);
+      setAddress(null);
+      setProvider(null);
+      setSigner(null);
+
+      console.log('✅ Reown completely disconnected');
+
+    } catch (error) {
+      console.error('❌ Error disconnecting Reown:', error);
     }
-  }, []);
+  };
 
   const value: WalletState = {
     isConnected,
@@ -347,6 +385,10 @@ const WalletProviderInner: React.FC<WalletProviderProps> = ({ children }) => {
     solanaConnection,
     solanaPublicKey: solanaWallet?.publicKey || null,
     solanaWallet,
+    reownAddress,
+    reownProvider,
+    setReownConnection,
+    disconnectReown,
     connect,
     disconnect,
     switchChain,
@@ -360,10 +402,8 @@ const WalletProviderInner: React.FC<WalletProviderProps> = ({ children }) => {
 };
 
 export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
-  const [chain, setChain] = useState<SupportedChain>('bnb');
-
   return (
-    <SolanaWalletProviderWrapper enabled={chain === 'solana'}>
+    <SolanaWalletProviderWrapper enabled={true}>
       <WalletProviderInner>
         {children}
       </WalletProviderInner>

@@ -2,3 +2,5 @@ vesting-dashboard/backend/.env
 vesting-dashboard/frontend/.env
 vesting-dashboard/frontend/.env.example
 /vesting_ondrix_cont/node_modules
+/vesting-dashboard/frontend/node_modules
+/vesting-dashboard/frontend/dist

@@ -35,7 +35,9 @@ export const VestingOverview: React.FC<VestingOverviewProps> = ({
       } else {
         const remainderStr = remainder.toString().padStart(decimals, '0');
         const trimmed = remainderStr.replace(/0+$/, '');
-        return `${quotient}.${trimmed}`;
+        // Limit to 3 decimal places
+        const limitedDecimals = trimmed.length > 3 ? trimmed.substring(0, 3) : trimmed;
+        return `${quotient}.${limitedDecimals}`;
       }
     } catch (error) {
       console.error('Error formatting token amount:', error, 'Amount:', amount, 'Decimals:', decimals);
@@ -62,10 +64,28 @@ export const VestingOverview: React.FC<VestingOverviewProps> = ({
   const status = getStatusIndicator();
 
   const getCurrentPeriodDisplay = (): string => {
-    if (progress.currentPeriod === 0) {
-      return "0/4 (Pre-vesting)";
+    // ✅ FIX: Different logic for different chains
+    if (schedule.chain === 'solana') {
+      // Solana: TGE + Linear vesting periods
+      if (progress.currentPeriod === 0) return "Pre-TGE";
+      if (progress.currentPeriod === 1) return `TGE (${schedule.tgePercentage || 15}%)`;
+      return `${progress.currentPeriod}/4 (Vesting)`;
+    } else {
+      // BNB: No TGE, only cliff + linear vesting
+      if (progress.currentPeriod === 0) return "Pre-cliff";
+      if (schedule.startTime > 0) {
+        const currentTime = Math.floor(Date.now() / 1000);
+        const elapsed = Math.max(0, currentTime - schedule.startTime);
+        if (elapsed < schedule.cliffDuration) {
+          return "Cliff period";
+        }
+        const progressPercent = Math.min(100, Math.max(0, 
+          ((elapsed - schedule.cliffDuration) / (schedule.vestingDuration - schedule.cliffDuration)) * 100
+        ));
+        return `${Math.floor(progressPercent)}% vested`;
+      }
+      return "Not started";
     }
-    return `${progress.currentPeriod}/4`;
   };
 
   return (
@@ -114,15 +134,22 @@ export const VestingOverview: React.FC<VestingOverviewProps> = ({
         <div className="overview-card">
           <div className="card-header">
             <Clock size={20} />
-            <h3>Current Period</h3>
+            <h3>{schedule.chain === 'solana' ? 'Current Period' : 'Vesting Status'}</h3>
           </div>
           <div className="card-value">
             {getCurrentPeriodDisplay()}
           </div>
           <div className="card-subtitle">
-            {progress.currentPeriod === 0 ? 'Vesting not started' : 
-             progress.currentPeriod === 4 ? 'All periods completed' :
-             `Period ${progress.currentPeriod} active`}
+            {schedule.chain === 'solana' ? (
+              progress.currentPeriod === 0 ? 'TGE not started' : 
+              progress.currentPeriod === 1 ? 'TGE period active' :
+              progress.currentPeriod === 4 ? 'All periods completed' :
+              `Linear vesting period ${progress.currentPeriod} active`
+            ) : (
+              progress.currentPeriod === 0 ? 'Waiting for cliff to end' :
+              progress.unlockedPercentage === 100 ? 'Fully vested' :
+              'Linear vesting in progress'
+            )}
           </div>
         </div>
 

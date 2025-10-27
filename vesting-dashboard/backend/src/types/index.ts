@@ -26,7 +26,8 @@ export interface UserPermission {
 
 export interface VestingRecipient {
   wallet: string;
-  percentage: number;
+  basisPoints: number;  // ✅ UPDATED: Use basis points instead of percentage
+  percentage?: number;  // ✅ LEGACY: Keep for backwards compatibility
 }
 
 export interface ContractConfig {
@@ -40,6 +41,7 @@ export interface ContractConfig {
     rpcUrl: string;
     programId: string;
     privateKey: string;
+    vestingPda: string;  // ✅ UPDATED: Add vesting PDA
   };
 }
 

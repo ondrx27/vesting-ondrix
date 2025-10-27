@@ -41,7 +41,7 @@ export default defineConfig({
   build: {
     target: 'esnext',
     rollupOptions: {
-      external: [],
+      external: ['@particle-network/chains'],
     },
   },
   server: {

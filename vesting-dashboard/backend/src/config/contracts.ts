@@ -9,7 +9,8 @@ export function getContractConfig(): ContractConfig {
     'BNB_PRIVATE_KEY',
     'SOLANA_RPC_URL',
     'SOLANA_PROGRAM_ID',
-    'SOLANA_PRIVATE_KEY'
+    'SOLANA_PRIVATE_KEY',
+    'SOLANA_VESTING_PDA'  // ✅ UPDATED: Add vesting PDA to required vars
   ];
 
   const missing = requiredEnvVars.filter(key => !process.env[key]);
@@ -24,9 +25,10 @@ export function getContractConfig(): ContractConfig {
   const solanaRpcUrl = process.env.SOLANA_RPC_URL;
   const solanaProgramId = process.env.SOLANA_PROGRAM_ID;
   const solanaPrivateKey = process.env.SOLANA_PRIVATE_KEY;
+  const solanaVestingPda = process.env.SOLANA_VESTING_PDA;  // ✅ UPDATED: Add vesting PDA
 
   if (!bnbRpcUrl || !bnbContractAddress || !bnbPrivateKey || 
-      !solanaRpcUrl || !solanaProgramId || !solanaPrivateKey) {
+      !solanaRpcUrl || !solanaProgramId || !solanaPrivateKey || !solanaVestingPda) {
     throw new Error('Required environment variables are not set');
   }
 
@@ -41,14 +43,22 @@ export function getContractConfig(): ContractConfig {
       rpcUrl: solanaRpcUrl,
       programId: solanaProgramId,
       privateKey: solanaPrivateKey,
+      vestingPda: solanaVestingPda,  // ✅ UPDATED: Add vesting PDA to config
     }
   };
 }
 
-// BNB Contract ABI - minimal for claiming
+// BNB Contract ABI - Updated for ProductionTokenVesting contract
 export const BNB_VESTING_ABI = [
   {
     "inputs": [],
+    "name": "distributeTokens",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"name": "_beneficiary", "type": "address"}],
     "name": "claimTokens",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -68,7 +78,9 @@ export const BNB_VESTING_ABI = [
       {
         "components": [
           {"name": "wallet", "type": "address"},
-          {"name": "percentage", "type": "uint8"}
+          {"name": "basisPoints", "type": "uint16"},
+          {"name": "claimedAmount", "type": "uint256"},
+          {"name": "lastClaimTime", "type": "uint256"}
         ],
         "name": "",
         "type": "tuple[]"
@@ -83,14 +95,54 @@ export const BNB_VESTING_ABI = [
     "outputs": [
       {"name": "isInitialized", "type": "bool"},
       {"name": "token", "type": "address"},
+      {"name": "authorizedFunder", "type": "address"},
       {"name": "startTime", "type": "uint256"},
       {"name": "cliffDuration", "type": "uint256"},
       {"name": "vestingDuration", "type": "uint256"},
       {"name": "totalAmount", "type": "uint256"},
       {"name": "claimedAmount", "type": "uint256"},
-      {"name": "recipientCount", "type": "uint8"},
-      {"name": "isTestMode", "type": "bool"}
+      {"name": "recipientCount", "type": "uint8"}
     ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"name": "_beneficiary", "type": "address"}],
+    "name": "canDistribute",
+    "outputs": [{"name": "", "type": "bool"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"name": "_beneficiary", "type": "address"}],
+    "name": "getVestingProgress",
+    "outputs": [
+      {"name": "elapsedTime", "type": "uint256"},
+      {"name": "unlockedPercentage", "type": "uint256"},
+      {"name": "unlockedAmount", "type": "uint256"},
+      {"name": "claimableAmount", "type": "uint256"},
+      {"name": "remainingAmount", "type": "uint256"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"name": "_beneficiary", "type": "address"},
+      {"name": "_recipient", "type": "address"}
+    ],
+    "name": "canClaim",
+    "outputs": [{"name": "", "type": "bool"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"name": "_beneficiary", "type": "address"},
+      {"name": "_recipient", "type": "address"}
+    ],
+    "name": "getRecipientClaimableAmount",
+    "outputs": [{"name": "", "type": "uint256"}],
     "stateMutability": "view",
     "type": "function"
   }
