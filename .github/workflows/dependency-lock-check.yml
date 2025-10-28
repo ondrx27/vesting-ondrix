@@ -56,7 +56,7 @@ jobs:
             echo "$INVALID_DEPS"
             echo ""
             echo "Required format:"
-            echo "  solana-program = \"=2.0\""
+            echo "  solana-program = \"=1.18.26\""
             echo "  spl-token = { version = \"=6.0\", ... }"
             echo ""
             exit 1
