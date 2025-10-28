@@ -57,7 +57,7 @@ jobs:
             echo ""
             echo "Required format:"
             echo "  solana-program = \"=1.18.26\""
-            echo "  spl-token = { version = \"=6.0\", ... }"
+            echo "  spl-token = { version = \"=4.0.0\", ... }"
             echo ""
             exit 1
           fi
@@ -139,7 +139,7 @@ jobs:
           echo "Security Review Checklist:"
           echo ""
           echo "Solana Contract:"
-          echo "  ✓ All Cargo.toml versions use exact match (=2.0)"
+          echo "  ✓ All Cargo.toml versions use exact match (=1.18.26)"
           echo "  ✓ Run 'cargo audit' in solana_vesting_ondrix_cont/"
           echo "  ✓ Run 'cargo build-sbf' to verify build"
           echo ""
