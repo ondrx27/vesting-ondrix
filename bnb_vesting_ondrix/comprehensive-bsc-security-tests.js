@@ -26,7 +26,7 @@ const CONFIG = {
     NETWORK_NAME: 'BSC Testnet',
     
     // Private key for tests (use a test account!)
-    PRIVATE_KEY: 'dfd2ebd931a3a2d7b965b4a5d818c1216aac137ccf9229d32069a73edee59ebe',
+    PRIVATE_KEY: 'YOUR_PRIVATE_KEY',
     
     // Test parameters
     TEST_AMOUNT: ethers.parseEther('1000'), // 1000 tokens for testing
